@@ -1,0 +1,481 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="description" content="BoothTogether - An intimate, real-time virtual photobooth designed for long-distance couples. Take synchronized snapshots together across any distance." />
+  <meta name="theme-color" content="#121212" />
+  <title>BoothTogether — Virtual LDR Photobooth</title>
+
+  <!-- Google Fonts: Playfair Display, Outfit & JetBrains Mono -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&family=Playfair+Display:ital,wght@0,600;0,700;0,900;1,600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+
+  <!-- Core App Stylesheets -->
+  <link rel="stylesheet" href="css/style.css" />
+  <link rel="stylesheet" href="css/filters.css" />
+</head>
+<body class="dark-theme">
+
+  <!-- Fullscreen Flash Overlay -->
+  <div id="flash-screen" class="flash-overlay"></div>
+
+  <!-- Floating Love Reactions Layer -->
+  <div id="reactions-layer" class="reactions-container"></div>
+
+  <!-- Toast Notifications Container -->
+  <div id="toast-container" class="toast-container"></div>
+
+  <!-- ========================================================= -->
+  <!-- 1. LANDING SCREEN                                         -->
+  <!-- ========================================================= -->
+  <main id="landing-screen" class="landing-view">
+    <div class="landing-stars"></div>
+    <header class="landing-header">
+      <div class="brand-badge">
+        <span class="heart-pulse">❤️</span>
+        <span class="badge-text">LONG-DISTANCE VIRTUAL PHOTOBOOTH</span>
+      </div>
+      <h1 class="marquee-title">BOOTH TOGETHER</h1>
+      <p class="tagline">
+        Smile, pose, and stay intimate across any distance.<br />
+        A private virtual photobooth with synchronized shutter, beauty ring light, and classic film strips.
+      </p>
+    </header>
+
+    <div class="booth-doors-container">
+      <!-- Card A: Create Booth -->
+      <div class="landing-card create-card">
+        <div class="card-icon">🎟️</div>
+        <h2>Create a Booth</h2>
+        <p>Start a cozy private session for you and your partner. Capped at strictly 2 lovers.</p>
+        <button id="btn-create-booth" class="btn-primary">
+          <span class="btn-icon">✨</span> Generate My Booth
+        </button>
+
+        <!-- Dynamic card shown once room code is generated -->
+        <div id="created-room-card" class="created-room-box hidden">
+          <div class="ticket-header">YOUR PRIVATE BOOTH CODE</div>
+          <div class="ticket-code-display">
+            <span id="created-room-code">ABC123</span>
+          </div>
+          <p class="ticket-hint">Share this code or link with your partner:</p>
+          <div class="ticket-actions">
+            <button class="btn-secondary btn-copy-link" data-code="">
+              📋 Copy Invite Link
+            </button>
+            <button id="btn-enter-created-booth" class="btn-primary">
+              🚪 Enter Booth Now
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Card B: Join Booth -->
+      <div class="landing-card join-card">
+        <div class="card-icon">💌</div>
+        <h2>Join Partner's Booth</h2>
+        <p>Received a 6-character room code from your partner? Enter it here to join them inside.</p>
+        <div class="join-input-group">
+          <input
+            type="text"
+            id="input-room-code"
+            class="room-code-input"
+            placeholder="e.g. ROSE42"
+            maxlength="6"
+            autocomplete="off"
+            spellcheck="false"
+          />
+          <button id="btn-join-booth" class="btn-accent">
+            Enter Booth 💖
+          </button>
+        </div>
+        <div class="security-note">
+          🔒 End-to-end peer-to-peer WebRTC video stream. Zero recording on server.
+        </div>
+      </div>
+    </div>
+
+    <!-- Feature Highlights Showcase -->
+    <div class="features-shelf">
+      <div class="feature-item">
+        <span class="feature-emoji">💡</span>
+        <div class="feature-text">
+          <strong>Screen Flashlight</strong>
+          <span>Pure #FFFFFF ring light to illuminate late-night bedroom calls.</span>
+        </div>
+      </div>
+      <div class="feature-item">
+        <span class="feature-emoji">⏱️</span>
+        <div class="feature-text">
+          <strong>Synced 3... 2... 1...</strong>
+          <span>Synchronized shutter countdown captures exact shared memories.</span>
+        </div>
+      </div>
+      <div class="feature-item">
+        <span class="feature-emoji">🎞️</span>
+        <div class="feature-text">
+          <strong>Classic Strips (JPG & PDF)</strong>
+          <span>High-res 1, 3, or 4-shot photobooth strips with custom stamps.</span>
+        </div>
+      </div>
+      <div class="feature-item">
+        <span class="feature-emoji">📱</span>
+        <div class="feature-text">
+          <strong>Phone ↔ Laptop Ready</strong>
+          <span>Smart 4:3 center-crop ensures neither partner is ever stretched.</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- HTTPS & Mobile Testing Advisory -->
+    <footer class="landing-footer">
+      <p class="mobile-tip">
+        📱 <strong>Mobile Note:</strong> Modern phone browsers require HTTPS for camera access. If pairing with a phone over local Wi-Fi or mobile data, use an HTTPS tunnel (e.g. ngrok or mkcert).
+      </p>
+    </footer>
+  </main>
+
+  <!-- ========================================================= -->
+  <!-- 2. PHOTOBOOTH MAIN STAGE                                  -->
+  <!-- ========================================================= -->
+  <div id="booth-screen" class="booth-view hidden">
+    <!-- Screen Flashlight Padding Wrapper (switches to #FFFFFF on ring light mode) -->
+    <div id="flashlight-wrapper" class="flashlight-container">
+      
+      <!-- Top Navigation & Status Bar -->
+      <header class="booth-navbar">
+        <div class="nav-left">
+          <span class="brand-mini">BOOTH TOGETHER</span>
+          <span class="room-code-badge badge-pill">#------</span>
+          <button class="nav-icon-btn btn-copy-link" title="Copy Invite Link">
+            📋 <span class="btn-label-desktop">Copy Link</span>
+          </button>
+        </div>
+
+        <div class="nav-center">
+          <div id="partner-status-badge" class="partner-badge">
+            <span class="status-dot yellow"></span> Waiting for Partner
+          </div>
+          <div id="booth-capacity-pill" class="capacity-pill">1 / 2 in Booth</div>
+        </div>
+
+        <div class="nav-right">
+          <!-- Screen Flashlight (Ring Light Mode) Toggle -->
+          <button id="btn-flashlight-toggle" class="nav-action-btn ringlight-btn" title="Screen Flashlight (Beauty Ring Light)">
+            <span class="icon">☀️</span>
+            <span class="btn-label-desktop">Ring Light</span>
+          </button>
+
+          <!-- Voice Mic Mute Toggle -->
+          <button id="btn-mute-toggle" class="nav-icon-btn" title="Toggle Microphone">
+            <span class="icon">🎙️</span>
+          </button>
+
+          <!-- Camera Switcher (Mobile) -->
+          <button id="btn-flip-camera" class="nav-icon-btn" title="Flip Camera">
+            <span class="icon">🔄</span>
+          </button>
+
+          <!-- Exit Booth -->
+          <button id="btn-exit-booth" class="nav-icon-btn danger" title="Leave Booth">
+            <span class="icon">✕</span>
+          </button>
+        </div>
+      </header>
+
+      <!-- Central Photobooth Frame -->
+      <section class="booth-frame-wrapper">
+        <div class="photobooth-vintage-frame">
+          <!-- Marquee Booth Sign -->
+          <div class="booth-sign">
+            <span class="sign-bulb"></span>
+            <span class="sign-text">★ PRIVATE PHOTOBOOTH ★</span>
+            <span class="sign-bulb"></span>
+          </div>
+
+          <!-- Dual Video Stage (Side-by-side desktop, stacked mobile) -->
+          <div id="booth-stage" class="stage-dual-grid">
+            
+            <!-- Left: Local User Video Card -->
+            <div class="video-card local-card">
+              <div class="video-wrapper">
+                <video id="local-video" class="booth-video mirrored" autoplay playsinline muted></video>
+                <div class="video-badge">
+                  <span class="badge-dot"></span> You
+                </div>
+              </div>
+            </div>
+
+            <!-- Right: Remote Partner Video Card -->
+            <div class="video-card remote-card">
+              <div class="video-wrapper">
+                <!-- Waiting State Placeholder (shown when partner not yet connected) -->
+                <div id="remote-waiting-placeholder" class="waiting-partner-box">
+                  <div class="pulse-ring">
+                    <span class="waiting-emoji">💌</span>
+                  </div>
+                  <h3>Waiting for Your Partner</h3>
+                  <p>Send them the room code or click below to copy the direct link:</p>
+                  <button class="btn-secondary btn-copy-link">
+                    📋 Copy Booth Link
+                  </button>
+                  <div class="solo-tip">
+                    <span>Testing solo? You can still snap strips with our companion mirror!</span>
+                  </div>
+                </div>
+
+                <!-- Live Partner Video -->
+                <video id="remote-video" class="booth-video hidden" autoplay playsinline></video>
+                <div class="video-badge partner-badge-pill">
+                  <span class="badge-dot green"></span> Partner 💕
+                </div>
+              </div>
+            </div>
+
+          </div>
+
+          <!-- Floating Love Reactions Bar -->
+          <div class="reactions-bar">
+            <button class="reaction-btn" data-emoji="❤️" title="Send Love">❤️</button>
+            <button class="reaction-btn" data-emoji="✨" title="Send Sparkles">✨</button>
+            <button class="reaction-btn" data-emoji="💋" title="Send Kisses">💋</button>
+            <button class="reaction-btn" data-emoji="🥰" title="Send Hugs">🥰</button>
+            <button class="reaction-btn" data-emoji="🥂" title="Cheers">🥂</button>
+            <button class="reaction-btn" data-emoji="🌸" title="Flowers">🌸</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Live Controls Dock -->
+      <footer class="booth-controls-dock">
+        <!-- Shot Mode Chips (1-Shot, 3-Strip, 4-Strip) -->
+        <div class="controls-row-top">
+          <div class="mode-selector">
+            <span class="control-label">CAPTURE MODE:</span>
+            <button class="mode-chip" data-mode="single">1 Snapshot</button>
+            <button class="mode-chip active" data-mode="strip3">Classic 3-Strip</button>
+            <button class="mode-chip" data-mode="strip4">Classic 4-Strip</button>
+          </div>
+        </div>
+
+        <!-- Filter Presets & Sliders -->
+        <div class="controls-row-filters">
+          <div class="filter-chips-scroll">
+            <button class="filter-chip active" data-filter="natural">
+              <span class="chip-swatch natural-swatch"></span> Natural
+            </button>
+            <button class="filter-chip" data-filter="golden">
+              <span class="chip-swatch golden-swatch"></span> Golden Hour
+            </button>
+            <button class="filter-chip" data-filter="bw">
+              <span class="chip-swatch bw-swatch"></span> Classic B&W
+            </button>
+            <button class="filter-chip" data-filter="sepia">
+              <span class="chip-swatch sepia-swatch"></span> Vintage Sepia
+            </button>
+            <button class="filter-chip" data-filter="pastel">
+              <span class="chip-swatch pastel-swatch"></span> Soft Pastel
+            </button>
+            <button class="filter-chip" data-filter="disposable">
+              <span class="chip-swatch disposable-swatch"></span> 90s Film
+            </button>
+            <button class="filter-chip" data-filter="midnight">
+              <span class="chip-swatch midnight-swatch"></span> Midnight Noir
+            </button>
+          </div>
+
+          <!-- Sliders: Brightness & Warmth -->
+          <div class="sliders-group">
+            <div class="slider-item">
+              <span class="slider-icon">☀️</span>
+              <input type="range" id="brightness-slider" min="50" max="180" value="100" title="Exposure / Brightness" />
+              <span class="slider-name">Light</span>
+            </div>
+            <div class="slider-item">
+              <span class="slider-icon">🌡️</span>
+              <input type="range" id="warmth-slider" min="-30" max="30" value="0" title="Warmth Tone" />
+              <span class="slider-name">Tone</span>
+            </div>
+            <label class="sync-filter-label" title="Synchronize filter look with your partner">
+              <input type="checkbox" id="sync-filter-toggle" checked />
+              <span>Sync with partner</span>
+            </label>
+          </div>
+        </div>
+
+        <!-- Central Shutter Button -->
+        <div class="controls-row-shutter">
+          <button id="btn-shutter" class="vintage-shutter-btn" title="Take Synchronized Photo Strip!">
+            <div class="shutter-inner">
+              <span class="shutter-camera-icon">📸</span>
+              <span class="shutter-label">SNAP</span>
+            </div>
+            <div class="shutter-ring"></div>
+          </button>
+        </div>
+      </footer>
+
+    </div>
+  </div>
+
+  <!-- ========================================================= -->
+  <!-- 3. SYNCHRONIZED COUNTDOWN OVERLAY                         -->
+  <!-- ========================================================= -->
+  <div id="countdown-overlay" class="countdown-modal hidden">
+    <div class="countdown-card">
+      <div id="countdown-shot-badge" class="countdown-badge">Pose 1 of 3</div>
+      <div id="countdown-number" class="countdown-digits pulse-anim">3</div>
+      <p class="countdown-hint">Strike a cute pose together!</p>
+      <button id="btn-cancel-countdown" class="btn-cancel-sm">✕ Cancel</button>
+    </div>
+  </div>
+
+  <!-- Multi-shot pause prep banner -->
+  <div id="prep-banner" class="prep-banner hidden">
+    Get ready for next pose... 💕
+  </div>
+
+  <!-- ========================================================= -->
+  <!-- 4. PHOTO STRIP CUSTOMIZATION & EXPORT MODAL               -->
+  <!-- ========================================================= -->
+  <div id="strip-modal" class="modal-backdrop hidden">
+    <div class="strip-modal-container">
+      
+      <!-- Left: Interactive Canvas Strip Preview -->
+      <div class="modal-preview-pane">
+        <div id="strip-canvas-container" class="strip-canvas-wrapper">
+          <!-- Rendered Strip Canvas injected here -->
+        </div>
+      </div>
+
+      <!-- Right: Customizer & Download Actions -->
+      <div class="modal-sidebar-pane">
+        <div class="sidebar-header">
+          <h2>Your Photobooth Strip 💕</h2>
+          <p>Captured live together. Customize and keep it forever!</p>
+        </div>
+
+        <!-- Theme Color Selector -->
+        <div class="config-section">
+          <label class="config-title">FRAME THEME</label>
+          <div class="theme-swatches-grid">
+            <button class="theme-swatch active cream-swatch" data-theme="cream" title="Classic Cream"></button>
+            <button class="theme-swatch noir-swatch" data-theme="noir" title="Noir Charcoal"></button>
+            <button class="theme-swatch blush-swatch" data-theme="blush" title="Rose Blush"></button>
+            <button class="theme-swatch kraft-swatch" data-theme="kraft" title="Retro Kraft"></button>
+            <button class="theme-swatch lavender-swatch" data-theme="lavender" title="Lavender Haze"></button>
+          </div>
+        </div>
+
+        <!-- Custom Caption Input -->
+        <div class="config-section">
+          <label for="strip-caption-input" class="config-title">ROMANTIC CAPTION</label>
+          <input
+            type="text"
+            id="strip-caption-input"
+            class="config-input"
+            value="Together in Booth 💕"
+            placeholder="e.g. Aryan & Maya • London to Tokyo"
+            maxlength="40"
+          />
+        </div>
+
+        <!-- Location / Distance Tag -->
+        <div class="config-section">
+          <label for="strip-location-input" class="config-title">LOCATION / DISTANCE TAG</label>
+          <input
+            type="text"
+            id="strip-location-input"
+            class="config-input"
+            value="Across the Miles"
+            placeholder="e.g. 5,420 miles apart"
+            maxlength="35"
+          />
+        </div>
+
+        <!-- Cute Stickers / Doodles -->
+        <div class="config-section">
+          <label class="config-title">STICKERS & EMBELLISHMENTS</label>
+          <div class="stickers-checkbox-group">
+            <label class="sticker-toggle">
+              <input type="checkbox" class="sticker-check" value="heart" checked />
+              <span>❤️ Hearts</span>
+            </label>
+            <label class="sticker-toggle">
+              <input type="checkbox" class="sticker-check" value="sparkle" checked />
+              <span>✨ Sparkles</span>
+            </label>
+            <label class="sticker-toggle">
+              <input type="checkbox" class="sticker-check" value="kiss" />
+              <span>💋 Kisses</span>
+            </label>
+          </div>
+        </div>
+
+        <!-- Export Actions -->
+        <div class="export-actions-group">
+          <button id="btn-download-jpg" class="btn-primary full-width">
+            📥 Download High-Res JPG
+          </button>
+          <button id="btn-download-pdf" class="btn-accent full-width">
+            📄 Download Print-Ready PDF
+          </button>
+          <button id="btn-copy-image" class="btn-secondary full-width">
+            📋 Copy to Clipboard
+          </button>
+          <button id="btn-retake-strip" class="btn-outline full-width">
+            🔄 Retake / Back to Booth
+          </button>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- ========================================================= -->
+  <!-- 5. CAMERA PERMISSION FALLBACK OVERLAY                     -->
+  <!-- ========================================================= -->
+  <div id="permission-overlay" class="permission-modal hidden">
+    <div class="permission-card">
+      <div class="permission-icon">📷</div>
+      <h3>Camera Access Needed</h3>
+      <p>
+        BoothTogether needs camera access to capture your live photobooth memories.
+        Please click "Allow" on your browser permission prompt.
+      </p>
+      <div class="permission-actions">
+        <button id="btn-retry-camera" class="btn-primary">
+          🔄 Retry Camera Permission
+        </button>
+        <button id="btn-use-demo-mode" class="btn-secondary">
+          🧸 Test with Virtual Demo Camera
+        </button>
+      </div>
+      <p class="permission-subtext">
+        *If using a mobile browser, remember that camera access is blocked over insecure HTTP connections. Use HTTPS or localhost.
+      </p>
+    </div>
+  </div>
+
+  <!-- PeerJS WebRTC Library (Enables serverless mode on GitHub Pages) -->
+  <script src="https://unpkg.com/peerjs@1.5.4/dist/peerjs.min.js"></script>
+
+  <!-- Confetti Celebration Library (CDN with graceful local fallback) -->
+  <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.3/dist/confetti.browser.min.js"></script>
+  <script src="js/lib/confetti-fallback.js"></script>
+
+  <!-- jsPDF Library (CDN with bundled fallback) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+  <script src="js/lib/jspdf-fallback.js"></script>
+
+  <!-- Core Application Modules -->
+  <script src="js/audio.js"></script>
+  <script src="js/filters.js"></script>
+  <script src="js/photostrip.js"></script>
+  <script src="js/signaling.js"></script>
+  <script src="js/webrtc.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

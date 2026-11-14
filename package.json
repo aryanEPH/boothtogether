@@ -1,0 +1,22 @@
+{
+  "name": "boothtogether",
+  "version": "1.0.0",
+  "description": "An intimate, real-time virtual photobooth designed specifically for long-distance (LDR) couples.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node server.js"
+  },
+  "keywords": [
+    "photobooth",
+    "webrtc",
+    "ldr",
+    "couples",
+    "real-time",
+    "camera-filters",
+    "ringlight",
+    "long-distance-relationship"
+  ],
+  "author": "BoothTogether Team",
+  "license": "MIT"
+}
