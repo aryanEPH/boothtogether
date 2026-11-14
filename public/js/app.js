@@ -155,6 +155,17 @@ class BoothApp {
       });
     }
 
+    // Reconnect Call Buttons (Navbar and inside Waiting Box)
+    const btnReconnect = document.getElementById('btn-reconnect-call');
+    if (btnReconnect) {
+      btnReconnect.addEventListener('click', () => this.reconnectPartnerMedia());
+    }
+
+    const btnWaitingConnect = document.getElementById('btn-waiting-connect-now');
+    if (btnWaitingConnect) {
+      btnWaitingConnect.addEventListener('click', () => this.reconnectPartnerMedia());
+    }
+
     // Exit Booth
     const btnExit = document.getElementById('btn-exit-booth');
     if (btnExit) {
@@ -775,20 +786,38 @@ class BoothApp {
   // ─── UI State Helpers ─────────────────────────────────────────────────────
 
   /**
-   * Update the partner status badge in the top nav.
-   * signaling = partner joined the room (shows their name)
-   * video = partner's video stream is actually live
+   * Update the partner status badge in the top nav and waiting card.
    */
   updatePartnerBadge(signalingConnected, videoLive) {
     const partnerPill = document.getElementById('partner-status-badge');
-    if (!partnerPill) return;
+    const reconnectBtn = document.getElementById('btn-reconnect-call');
+    const waitingTitle = document.getElementById('waiting-status-title');
+    const waitingDesc = document.getElementById('waiting-status-desc');
+    const waitingCopy = document.getElementById('btn-waiting-copy');
+    const waitingConnectBtn = document.getElementById('btn-waiting-connect-now');
+    const waitingIcon = document.getElementById('waiting-icon');
 
     if (videoLive) {
-      partnerPill.innerHTML = '<span class="status-dot green"></span> Live Call 🎥';
+      if (partnerPill) partnerPill.innerHTML = '<span class="status-dot green"></span> Live Call 🎥';
+      if (reconnectBtn) reconnectBtn.classList.add('hidden');
     } else if (signalingConnected) {
-      partnerPill.innerHTML = '<span class="status-dot yellow"></span> Partner in Booth 💕';
+      if (partnerPill) partnerPill.innerHTML = '<span class="status-dot yellow"></span> Partner in Booth 💕';
+      if (reconnectBtn) reconnectBtn.classList.remove('hidden');
+
+      if (waitingTitle) waitingTitle.textContent = 'Partner in Booth! Connecting... 💕';
+      if (waitingDesc) waitingDesc.textContent = 'Establishing secure P2P video & voice stream...';
+      if (waitingCopy) waitingCopy.classList.add('hidden');
+      if (waitingConnectBtn) waitingConnectBtn.classList.remove('hidden');
+      if (waitingIcon) waitingIcon.textContent = '🎥';
     } else {
-      partnerPill.innerHTML = '<span class="status-dot yellow"></span> Waiting for Partner';
+      if (partnerPill) partnerPill.innerHTML = '<span class="status-dot yellow"></span> Waiting for Partner';
+      if (reconnectBtn) reconnectBtn.classList.add('hidden');
+
+      if (waitingTitle) waitingTitle.textContent = 'Waiting for Your Partner';
+      if (waitingDesc) waitingDesc.textContent = 'Send them the room code or click below to copy the direct link:';
+      if (waitingCopy) waitingCopy.classList.remove('hidden');
+      if (waitingConnectBtn) waitingConnectBtn.classList.add('hidden');
+      if (waitingIcon) waitingIcon.textContent = '💌';
     }
   }
 
@@ -799,15 +828,23 @@ class BoothApp {
     const placeholder = document.getElementById('remote-waiting-placeholder');
     const remoteVideo = document.getElementById('remote-video');
     const remoteAudio = document.getElementById('remote-audio');
+    const reconnectBtn = document.getElementById('btn-reconnect-call');
 
-    if (placeholder) placeholder.classList.add('hidden');
+    if (placeholder) {
+      placeholder.classList.add('hidden');
+      placeholder.style.display = 'none';
+    }
     if (remoteVideo) {
       remoteVideo.classList.remove('hidden');
+      remoteVideo.style.display = 'block';
       remoteVideo.muted = true;
       remoteVideo.play().catch(() => {});
     }
     if (remoteAudio && remoteAudio.srcObject && remoteAudio.paused) {
       remoteAudio.play().catch(() => {});
+    }
+    if (reconnectBtn) {
+      reconnectBtn.classList.add('hidden');
     }
   }
 
@@ -820,13 +857,38 @@ class BoothApp {
     const remoteAudio = document.getElementById('remote-audio');
     const unmuteBanner = document.getElementById('btn-unmute-call');
 
-    if (placeholder) placeholder.classList.remove('hidden');
+    if (placeholder) {
+      placeholder.classList.remove('hidden');
+      placeholder.style.display = 'flex';
+    }
     if (remoteVideo) {
       remoteVideo.classList.add('hidden');
+      remoteVideo.style.display = 'none';
       remoteVideo.srcObject = null;
     }
     if (remoteAudio) remoteAudio.srcObject = null;
     if (unmuteBanner) unmuteBanner.classList.add('hidden');
+  }
+
+  /**
+   * Manually trigger re-negotiation if network or firewall stalled
+   */
+  async reconnectPartnerMedia() {
+    this.showToast('🔄 Reconnecting video & voice stream...', 'info');
+    console.log('Manual media reconnect triggered...');
+    if (this.signaling.mode === 'websocket') {
+      await this.webrtc.createAndSendOffer(this.signaling);
+    } else if (this.signaling.mode === 'peerjs') {
+      this.signaling.activeCall = null;
+      const targetId = this.signaling.role === 'initiator'
+        ? `bt_${this.roomId.toLowerCase()}_guest`
+        : `bt_${this.roomId.toLowerCase()}_host`;
+      const stream = await this.signaling.getReadyLocalStream();
+      if (stream && this.signaling.peer) {
+        const call = this.signaling.peer.call(targetId, stream);
+        this.signaling.bindCallEvents(call, 'partner');
+      }
+    }
   }
 
   updateRoomBadge(roomId) {

@@ -236,17 +236,17 @@ class BoothSignaling {
       {
         urls: 'turn:openrelay.metered.ca:80',
         username: 'openrelayproject',
-        credential: 'openrelayproject'
+        credential: 'openrelayprojectsecret'
       },
       {
         urls: 'turn:openrelay.metered.ca:443',
         username: 'openrelayproject',
-        credential: 'openrelayproject'
+        credential: 'openrelayprojectsecret'
       },
       {
         urls: 'turn:openrelay.metered.ca:443?transport=tcp',
         username: 'openrelayproject',
-        credential: 'openrelayproject'
+        credential: 'openrelayprojectsecret'
       }
     ];
 

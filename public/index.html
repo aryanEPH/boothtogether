@@ -158,6 +158,9 @@
           <div id="partner-status-badge" class="partner-badge">
             <span class="status-dot yellow"></span> Waiting for Partner
           </div>
+          <button id="btn-reconnect-call" class="nav-icon-btn hidden" title="Force reconnect video & voice call">
+            🔄 <span class="btn-label-desktop">Reconnect</span>
+          </button>
           <div id="booth-capacity-pill" class="capacity-pill">1 / 2 in Booth</div>
         </div>
 
@@ -220,12 +223,15 @@
                 <!-- Waiting State Placeholder (shown when partner not yet connected) -->
                 <div id="remote-waiting-placeholder" class="waiting-partner-box">
                   <div class="pulse-ring">
-                    <span class="waiting-emoji">💌</span>
+                    <span class="waiting-emoji" id="waiting-icon">💌</span>
                   </div>
-                  <h3>Waiting for Your Partner</h3>
-                  <p>Send them the room code or click below to copy the direct link:</p>
-                  <button class="btn-secondary btn-copy-link">
+                  <h3 id="waiting-status-title">Waiting for Your Partner</h3>
+                  <p id="waiting-status-desc">Send them the room code or click below to copy the direct link:</p>
+                  <button class="btn-secondary btn-copy-link" id="btn-waiting-copy">
                     📋 Copy Booth Link
+                  </button>
+                  <button id="btn-waiting-connect-now" class="btn-primary hidden" style="margin-top: 10px;">
+                    🔄 Click to Connect Video Now
                   </button>
                   <div class="solo-tip">
                     <span>Testing solo? You can still snap strips with our companion mirror!</span>

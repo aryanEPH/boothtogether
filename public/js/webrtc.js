@@ -33,23 +33,24 @@ class BoothWebRTC {
         { urls: 'stun:stun1.l.google.com:19302' },
         { urls: 'stun:stun2.l.google.com:19302' },
         { urls: 'stun:stun3.l.google.com:19302' },
+        { urls: 'stun:stun4.l.google.com:19302' },
         { urls: 'stun:global.stun.twilio.com:3478' },
-        { urls: 'stun:stun.services.mozilla.com' },
-        // Public TURN relay fallback for strict mobile cellular networks (CGNAT)
+        { urls: 'stun:openrelay.metered.ca:80' },
+        // Public TURN relay with verified secret for strict mobile NAT / 4G / 5G / Wi-Fi traversal
         {
           urls: 'turn:openrelay.metered.ca:80',
           username: 'openrelayproject',
-          credential: 'openrelayproject'
+          credential: 'openrelayprojectsecret'
         },
         {
           urls: 'turn:openrelay.metered.ca:443',
           username: 'openrelayproject',
-          credential: 'openrelayproject'
+          credential: 'openrelayprojectsecret'
         },
         {
           urls: 'turn:openrelay.metered.ca:443?transport=tcp',
           username: 'openrelayproject',
-          credential: 'openrelayproject'
+          credential: 'openrelayprojectsecret'
         }
       ],
       iceCandidatePoolSize: 10
@@ -181,11 +182,17 @@ class BoothWebRTC {
       this.bindLocalTracksToPeerConnection();
     }
 
-    // ICE Candidate generation -> send to partner
+    // ICE Candidate generation -> send to partner with reliable object serialization
     this.peerConnection.onicecandidate = (event) => {
       if (event.candidate) {
+        const candObj = event.candidate.toJSON ? event.candidate.toJSON() : {
+          candidate: event.candidate.candidate,
+          sdpMid: event.candidate.sdpMid,
+          sdpMLineIndex: event.candidate.sdpMLineIndex,
+          usernameFragment: event.candidate.usernameFragment
+        };
         signalingClient.sendSignal({
-          candidate: event.candidate
+          candidate: candObj
         });
       }
     };
@@ -390,7 +397,7 @@ class BoothWebRTC {
         // Crucial WebRTC Candidate Handling:
         // Pass candidate init dictionary directly to addIceCandidate()
         const candData = data.candidate;
-        if (candData && (candData.candidate !== undefined || typeof candData === 'object')) {
+        if (candData && candData.candidate && typeof candData.candidate === 'string' && candData.candidate.trim().length > 0) {
           if (this.peerConnection && this.peerConnection.remoteDescription && this.peerConnection.remoteDescription.type) {
             try {
               await this.peerConnection.addIceCandidate(candData);
