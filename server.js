@@ -280,10 +280,18 @@ function handleClientMessage(socket, rawMessage) {
   }
 
   const { type, roomId, clientId, payload } = msg;
+  const meta = socketMeta.get(socket);
+  const activeRoomId = (meta?.roomId || roomId || '').trim().toUpperCase();
 
   switch (type) {
+    // Keepalive Ping/Pong for Render reverse proxy
+    case 'PING': {
+      sendJson(socket, { type: 'PONG', t: payload?.t || Date.now() });
+      break;
+    }
+
     case 'JOIN_ROOM': {
-      const targetRoomId = (roomId || '').trim().toUpperCase();
+      const targetRoomId = activeRoomId;
       if (!targetRoomId || targetRoomId.length !== 6) {
         sendJson(socket, {
           type: 'ERROR',
@@ -340,6 +348,8 @@ function handleClientMessage(socket, rawMessage) {
         const initiator = clientsArray.find(c => c.role === 'initiator') || clientsArray[0];
         const receiver = clientsArray.find(c => c.role === 'receiver') || clientsArray[1];
 
+        console.log(`[ROOM ${targetRoomId}] Pairing complete! Initiator: ${initiator.name}, Receiver: ${receiver.name}`);
+
         // Notify initiator that receiver has joined -> initiator will create WebRTC offer
         sendJson(initiator.socket, {
           type: 'PEER_JOINED',
@@ -363,9 +373,9 @@ function handleClientMessage(socket, rawMessage) {
 
     // WebRTC Signaling: relay Offer, Answer, ICE candidates between the 2 peers
     case 'SIGNAL': {
-      const room = rooms.get(roomId);
-      if (!room) return;
-      broadcastToRoom(roomId, socket, {
+      if (!activeRoomId) return;
+      console.log(`[ROOM ${activeRoomId}] Relaying WebRTC signal from ${clientId}`);
+      broadcastToRoom(activeRoomId, socket, {
         type: 'SIGNAL',
         senderId: clientId,
         signalData: payload
@@ -376,8 +386,8 @@ function handleClientMessage(socket, rawMessage) {
     // Synchronized Countdown Shutter Trigger
     case 'TRIGGER_COUNTDOWN': {
       const syncTimestamp = Date.now() + 150; // Add small sync buffer for clock drift
-      console.log(`[ROOM ${roomId}] Synchronized countdown triggered by ${clientId}`);
-      broadcastToRoom(roomId, socket, {
+      console.log(`[ROOM ${activeRoomId}] Synchronized countdown triggered by ${clientId}`);
+      broadcastToRoom(activeRoomId, socket, {
         type: 'SYNCED_COUNTDOWN_START',
         triggeredBy: clientId,
         syncTimestamp,
@@ -389,7 +399,7 @@ function handleClientMessage(socket, rawMessage) {
     }
 
     case 'CANCEL_COUNTDOWN': {
-      broadcastToRoom(roomId, socket, {
+      broadcastToRoom(activeRoomId, socket, {
         type: 'SYNCED_COUNTDOWN_CANCELLED',
         cancelledBy: clientId
       }, true);
@@ -398,7 +408,7 @@ function handleClientMessage(socket, rawMessage) {
 
     // Live Filter & Brightness Synchronization
     case 'SYNC_FILTER': {
-      broadcastToRoom(roomId, socket, {
+      broadcastToRoom(activeRoomId, socket, {
         type: 'FILTER_UPDATED',
         senderId: clientId,
         filterPreset: payload?.filterPreset || 'natural',
@@ -411,7 +421,7 @@ function handleClientMessage(socket, rawMessage) {
 
     // Screen Flashlight (Ring Light Mode) state sync
     case 'SYNC_FLASHLIGHT': {
-      broadcastToRoom(roomId, socket, {
+      broadcastToRoom(activeRoomId, socket, {
         type: 'FLASHLIGHT_UPDATED',
         senderId: clientId,
         active: !!payload?.active
@@ -421,7 +431,7 @@ function handleClientMessage(socket, rawMessage) {
 
     // Synced Photostrip Layout & Customization
     case 'SYNC_STRIP_CONFIG': {
-      broadcastToRoom(roomId, socket, {
+      broadcastToRoom(activeRoomId, socket, {
         type: 'STRIP_CONFIG_UPDATED',
         senderId: clientId,
         config: payload
@@ -431,7 +441,7 @@ function handleClientMessage(socket, rawMessage) {
 
     // Real-Time Love Reactions & Floating Hearts
     case 'SEND_REACTION': {
-      broadcastToRoom(roomId, socket, {
+      broadcastToRoom(activeRoomId, socket, {
         type: 'REACTION_RECEIVED',
         senderId: clientId,
         emoji: payload?.emoji || '❤️',
@@ -443,7 +453,7 @@ function handleClientMessage(socket, rawMessage) {
 
     // Partner chat message / cute whispers
     case 'SEND_MESSAGE': {
-      broadcastToRoom(roomId, socket, {
+      broadcastToRoom(activeRoomId, socket, {
         type: 'MESSAGE_RECEIVED',
         senderId: clientId,
         senderName: payload?.senderName || 'Partner',
@@ -488,6 +498,15 @@ function cleanupSocket(socket) {
     }, true);
   }
 }
+
+// Render Proxy Keep-Alive: Ping active sockets every 25 seconds to prevent Render 55s timeout
+setInterval(() => {
+  for (const [socket, meta] of socketMeta.entries()) {
+    if (!socket.destroyed && socket.writable) {
+      sendWsFrame(socket, Buffer.alloc(0), 0x9); // RFC 6455 Ping frame
+    }
+  }
+}, 25000);
 
 // Start Server
 server.listen(PORT, '0.0.0.0', () => {

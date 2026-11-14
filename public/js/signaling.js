@@ -81,6 +81,14 @@ class BoothSignaling {
         this.reconnectAttempts = 0;
         this.emit('connected');
 
+        // Start heartbeat to keep Render reverse proxy connection alive
+        if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
+        this.heartbeatTimer = setInterval(() => {
+          if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+            this.send('PING', { t: Date.now() });
+          }
+        }, 20000);
+
         if (this.pendingJoin) {
           this.joinRoom(this.pendingJoin.roomId, this.pendingJoin.name, this.pendingJoin.isCreator);
           this.pendingJoin = null;
@@ -99,20 +107,24 @@ class BoothSignaling {
       };
 
       this.ws.onclose = () => {
+        const wasConnected = this.connected;
         this.connected = false;
+        if (this.heartbeatTimer) clearInterval(this.heartbeatTimer);
         this.emit('disconnected');
 
-        // If on initial connection WebSocket closed immediately (e.g., static hosting), switch to PeerJS
-        if (this.reconnectAttempts === 0) {
-          console.log('WebSocket closed. Switching to PeerJS serverless cloud...');
+        // Only switch to PeerJS if explicitly on static hosting (like GitHub Pages)
+        if (!wasConnected && this.isStaticHost) {
+          console.log('WebSocket unavailable on static host. Using PeerJS serverless cloud...');
           this.switchToPeerJsMode();
           resolve();
           return;
         }
 
+        // On Render / Node.js, attempt automatic reconnection
         if (this.reconnectAttempts < this.maxReconnectAttempts && this.roomId) {
           this.reconnectAttempts++;
-          const delay = Math.min(1000 * Math.pow(1.5, this.reconnectAttempts), 8000);
+          const delay = Math.min(1000 * Math.pow(1.5, this.reconnectAttempts), 6000);
+          console.log(`WebSocket disconnected. Reconnecting in ${delay}ms (attempt ${this.reconnectAttempts})...`);
           clearTimeout(this.reconnectTimer);
           this.reconnectTimer = setTimeout(() => {
             this.connect().then(() => {
@@ -125,8 +137,8 @@ class BoothSignaling {
       };
 
       this.ws.onerror = () => {
-        if (!this.connected) {
-          console.log('WebSocket failed. Activating PeerJS serverless cloud mode for GitHub Pages...');
+        if (!this.connected && this.isStaticHost) {
+          console.log('WebSocket failed on static host. Activating PeerJS serverless cloud mode...');
           this.switchToPeerJsMode();
           resolve();
         }
