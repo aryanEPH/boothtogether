@@ -232,8 +232,8 @@
                   </div>
                 </div>
 
-                <!-- Live Partner Video -->
-                <video id="remote-video" class="booth-video hidden" autoplay playsinline></video>
+                <!-- Live Partner Video (muted=true ensures video autoplay is NEVER blocked by browser policy; audio is played via #remote-audio) -->
+                <video id="remote-video" class="booth-video hidden" autoplay playsinline muted></video>
                 <!-- Dedicated Audio Element for Two-Way Voice Call -->
                 <audio id="remote-audio" autoplay playsinline></audio>
                 <!-- Tap to unmute button if browser autoplay policy blocks sound -->

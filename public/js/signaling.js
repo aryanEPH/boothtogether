@@ -163,6 +163,35 @@ class BoothSignaling {
   /**
    * PeerJS Serverless Mode for GitHub Pages
    */
+  /**
+   * Helper: Wait until local webcam/mic stream is ready before calling or answering
+   */
+  async getReadyLocalStream(maxWaitMs = 3500) {
+    if (window.boothWebRTC?.localStream) {
+      return window.boothWebRTC.localStream;
+    }
+    const start = Date.now();
+    while (Date.now() - start < maxWaitMs) {
+      if (window.boothWebRTC?.localStream) {
+        return window.boothWebRTC.localStream;
+      }
+      await new Promise(r => setTimeout(r, 120));
+    }
+    // If user media still pending, attempt ensure or demo mode fallback
+    if (window.boothWebRTC) {
+      try {
+        await window.boothWebRTC.ensureLocalTracksAdded();
+        return window.boothWebRTC.localStream;
+      } catch (e) {
+        return window.boothWebRTC.startDemoStream();
+      }
+    }
+    return null;
+  }
+
+  /**
+   * PeerJS Serverless Mode for GitHub Pages (Equipped with full STUN + TURN relay)
+   */
   joinPeerJsRoom(roomId, isCreator) {
     if (!window.Peer) {
       console.error('PeerJS library not loaded.');
@@ -184,13 +213,36 @@ class BoothSignaling {
       this.peer.destroy();
     }
 
+    // Comprehensive STUN and TURN configuration for NAT/firewall traversal
+    const iceServers = [
+      { urls: 'stun:stun.l.google.com:19302' },
+      { urls: 'stun:stun1.l.google.com:19302' },
+      { urls: 'stun:stun2.l.google.com:19302' },
+      { urls: 'stun:stun3.l.google.com:19302' },
+      { urls: 'stun:global.stun.twilio.com:3478' },
+      { urls: 'stun:stun.services.mozilla.com' },
+      {
+        urls: 'turn:openrelay.metered.ca:80',
+        username: 'openrelayproject',
+        credential: 'openrelayproject'
+      },
+      {
+        urls: 'turn:openrelay.metered.ca:443',
+        username: 'openrelayproject',
+        credential: 'openrelayproject'
+      },
+      {
+        urls: 'turn:openrelay.metered.ca:443?transport=tcp',
+        username: 'openrelayproject',
+        credential: 'openrelayproject'
+      }
+    ];
+
     this.peer = new Peer(myPeerId, {
       debug: 1,
       config: {
-        iceServers: [
-          { urls: 'stun:stun.l.google.com:19302' },
-          { urls: 'stun:stun1.l.google.com:19302' }
-        ]
+        iceServers: iceServers,
+        sdpSemantics: 'unified-plan'
       }
     });
 
@@ -203,11 +255,11 @@ class BoothSignaling {
         userCount: isCreator ? 1 : 2
       });
 
-      // If joiner, connect data channel & media call to host
+      // If guest/joiner, connect data channel to host
       if (!isCreator) {
         setTimeout(() => {
           this.connectToPeer(targetPeerId);
-        }, 600);
+        }, 500);
       }
     });
 
@@ -222,25 +274,27 @@ class BoothSignaling {
         peerName: 'Partner',
         shouldInitiateOffer: false
       });
+
+      // Media call watchdog: if host doesn't receive a call within 3 seconds, initiate call to guest
+      setTimeout(async () => {
+        if (!this.activeCall && this.peerConn && this.peerConn.open) {
+          console.log('[PeerJS Cloud] Host watchdog: Initiating media call to guest...');
+          const stream = await this.getReadyLocalStream();
+          if (stream) {
+            const call = this.peer.call(targetPeerId, stream);
+            this.bindCallEvents(call, 'guest');
+          }
+        }
+      }, 2800);
     });
 
     // Handle incoming media call
     this.peer.on('call', async (call) => {
       console.log('[PeerJS Cloud] Incoming video & voice call from:', call.peer);
-      this.activeCall = call;
-
-      if (window.boothWebRTC) {
-        await window.boothWebRTC.ensureLocalTracksAdded();
-      }
-      const localStream = window.boothWebRTC?.localStream;
-      call.answer(localStream);
-
-      call.on('stream', (remoteStream) => {
-        console.log('[PeerJS Cloud] Remote stream received from partner');
-        if (window.boothWebRTC) {
-          window.boothWebRTC.handleRemoteStream(remoteStream);
-        }
-      });
+      const stream = await this.getReadyLocalStream();
+      console.log(`[PeerJS Cloud] Answering call with local stream (tracks: ${stream ? stream.getTracks().length : 0})...`);
+      call.answer(stream);
+      this.bindCallEvents(call, 'partner');
     });
 
     this.peer.on('error', (err) => {
@@ -253,8 +307,38 @@ class BoothSignaling {
     });
   }
 
+  bindCallEvents(call, peerName = 'partner') {
+    this.activeCall = call;
+
+    call.on('stream', (remoteStream) => {
+      console.log(`[PeerJS Cloud] >>> REMOTE MEDIA STREAM RECEIVED from ${peerName}! (tracks: ${remoteStream.getTracks().length})`);
+      if (window.boothWebRTC) {
+        window.boothWebRTC.handleRemoteStream(remoteStream);
+      }
+    });
+
+    call.on('error', (err) => {
+      console.warn(`[PeerJS Cloud] Call error with ${peerName}:`, err);
+    });
+
+    call.on('close', () => {
+      console.log(`[PeerJS Cloud] Call closed with ${peerName}`);
+      this.activeCall = null;
+    });
+
+    // Check underlying RTCPeerConnection if accessible
+    if (call.peerConnection) {
+      call.peerConnection.onconnectionstatechange = () => {
+        console.log(`[PeerJS Cloud] Underlying WebRTC state: ${call.peerConnection.connectionState}`);
+        if (window.boothWebRTC?.onConnectionStateChange) {
+          window.boothWebRTC.onConnectionStateChange(call.peerConnection.connectionState);
+        }
+      };
+    }
+  }
+
   connectToPeer(targetPeerId) {
-    console.log(`[PeerJS Cloud] Connecting to target peer: ${targetPeerId}...`);
+    console.log(`[PeerJS Cloud] Connecting data channel to target peer: ${targetPeerId}...`);
     const conn = this.peer.connect(targetPeerId, { reliable: true });
     this.setupPeerDataConnection(conn);
 
@@ -267,22 +351,14 @@ class BoothSignaling {
         shouldInitiateOffer: false
       });
 
-      // Start media call
-      if (window.boothWebRTC) {
-        await window.boothWebRTC.ensureLocalTracksAdded();
-      }
-      const localStream = window.boothWebRTC?.localStream;
-      if (localStream) {
-        console.log('[PeerJS Cloud] Calling host with local video & audio stream...');
-        const call = this.peer.call(targetPeerId, localStream);
-        this.activeCall = call;
-
-        call.on('stream', (remoteStream) => {
-          console.log('[PeerJS Cloud] Remote stream received from host');
-          if (window.boothWebRTC) {
-            window.boothWebRTC.handleRemoteStream(remoteStream);
-          }
-        });
+      // Start media call to host
+      const stream = await this.getReadyLocalStream();
+      if (stream) {
+        console.log(`[PeerJS Cloud] Calling host ${targetPeerId} with local video & audio stream...`);
+        const call = this.peer.call(targetPeerId, stream);
+        this.bindCallEvents(call, 'host');
+      } else {
+        console.warn('[PeerJS Cloud] Local stream not ready yet when calling host.');
       }
     });
   }

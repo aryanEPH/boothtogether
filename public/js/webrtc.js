@@ -45,6 +45,11 @@ class BoothWebRTC {
           urls: 'turn:openrelay.metered.ca:443',
           username: 'openrelayproject',
           credential: 'openrelayproject'
+        },
+        {
+          urls: 'turn:openrelay.metered.ca:443?transport=tcp',
+          username: 'openrelayproject',
+          credential: 'openrelayproject'
         }
       ],
       iceCandidatePoolSize: 10
@@ -211,20 +216,25 @@ class BoothWebRTC {
       }
     };
 
-    // Remote Track Handler: receives partner's video and audio streams
+    // Remote Track Handler: receives partner's video and audio tracks
     this.peerConnection.ontrack = (event) => {
-      console.log('>>> REMOTE TRACK RECEIVED:', event.track.kind, event.streams);
+      console.log(`>>> REMOTE TRACK RECEIVED: kind=${event.track.kind}, id=${event.track.id}, readyState=${event.track.readyState}`);
 
-      let stream = (event.streams && event.streams[0]) ? event.streams[0] : null;
-      if (!stream) {
-        if (!this.remoteStream) {
-          this.remoteStream = new MediaStream();
-        }
-        this.remoteStream.addTrack(event.track);
-        stream = this.remoteStream;
-      } else {
-        this.remoteStream = stream;
+      if (!this.remoteStream) {
+        this.remoteStream = new MediaStream();
       }
+
+      // Add track to persistent remoteStream if not already present
+      const alreadyPresent = this.remoteStream.getTracks().some(t => t.id === event.track.id);
+      if (!alreadyPresent) {
+        this.remoteStream.addTrack(event.track);
+      }
+
+      // Also listen to track unmuting (when media packets actually start flowing)
+      event.track.onunmute = () => {
+        console.log(`>>> Remote track unmuted (media packets flowing): [${event.track.kind}]`);
+        this.handleRemoteStream(this.remoteStream);
+      };
 
       this.handleRemoteStream(this.remoteStream);
     };
@@ -236,8 +246,13 @@ class BoothWebRTC {
    * Handle incoming remote MediaStream (Used by both native WebRTC and PeerJS)
    */
   handleRemoteStream(stream) {
+    if (!stream) return;
     this.remoteStream = stream;
-    console.log('Binding remote stream to DOM (Tracks count: ' + stream.getTracks().length + ')');
+    const tracks = stream.getTracks();
+    const videoTracks = stream.getVideoTracks();
+    const audioTracks = stream.getAudioTracks();
+
+    console.log(`>>> Binding remote stream to DOM (Total tracks: ${tracks.length}, Video: ${videoTracks.length}, Audio: ${audioTracks.length})`);
 
     this.hideWaitingPlaceholder();
 
@@ -245,37 +260,50 @@ class BoothWebRTC {
     const remoteVideo = document.getElementById('remote-video');
     if (remoteVideo) {
       remoteVideo.classList.remove('hidden');
-      if (remoteVideo.srcObject !== stream) {
-        remoteVideo.srcObject = stream;
-      }
+      // Crucial: remoteVideo MUST be muted so video autoplay is never blocked by browser policy!
+      remoteVideo.muted = true;
       remoteVideo.playsInline = true;
       remoteVideo.autoplay = true;
 
-      remoteVideo.play().then(() => {
-        console.log('✓ Remote video playback started successfully');
-      }).catch(err => {
-        console.warn('Remote video autoplay blocked by browser policy:', err);
-        this.showAutoplayUnblockBanner();
-      });
+      // Always rebind or refresh srcObject when a video track is present
+      if (remoteVideo.srcObject !== stream || remoteVideo.paused) {
+        remoteVideo.srcObject = stream;
+      }
+
+      const vPlay = remoteVideo.play();
+      if (vPlay !== undefined) {
+        vPlay.then(() => {
+          console.log('✓ Remote video playback active and rendering frames');
+        }).catch(err => {
+          console.warn('Remote video playback warning (retrying):', err);
+          remoteVideo.muted = true;
+          remoteVideo.play().catch(() => {});
+        });
+      }
     }
 
-    // 2. Bind to Dedicated Remote Audio element for crystal-clear voice call
+    // 2. Bind to Dedicated Remote Audio element for two-way voice call
     const remoteAudio = document.getElementById('remote-audio');
     if (remoteAudio) {
-      if (remoteAudio.srcObject !== stream) {
+      if (remoteAudio.srcObject !== stream || remoteAudio.paused) {
         remoteAudio.srcObject = stream;
       }
       remoteAudio.volume = this.partnerVolume;
-      remoteAudio.play().then(() => {
-        console.log('✓ Remote audio call playback active');
-      }).catch(err => {
-        console.warn('Remote audio autoplay blocked by browser policy:', err);
-        this.showAutoplayUnblockBanner();
-      });
+      const aPlay = remoteAudio.play();
+      if (aPlay !== undefined) {
+        aPlay.then(() => {
+          console.log('✓ Remote audio voice call playback active');
+        }).catch(err => {
+          console.warn('Remote audio autoplay blocked by browser policy (banner displayed):', err);
+          this.showAutoplayUnblockBanner();
+        });
+      }
     }
 
     // 3. Start audio volume visualizer (shows speaking wave indicator on partner)
-    this.setupRemoteAudioAnalysis(stream);
+    if (audioTracks.length > 0) {
+      this.setupRemoteAudioAnalysis(stream);
+    }
 
     if (this.onRemoteTrackReceived) {
       this.onRemoteTrackReceived(stream);
@@ -359,20 +387,20 @@ class BoothWebRTC {
           await this.flushPendingCandidates();
         }
       } else if (data.candidate) {
-        const candidate = new RTCIceCandidate(data.candidate);
-
-        // Crucial WebRTC Race Condition Fix:
-        // Only add ICE candidate if remote description is already set.
-        // Otherwise queue it until setRemoteDescription completes!
-        if (this.peerConnection && this.peerConnection.remoteDescription && this.peerConnection.remoteDescription.type) {
-          try {
-            await this.peerConnection.addIceCandidate(candidate);
-          } catch (e) {
-            console.warn('Error adding ICE candidate:', e);
+        // Crucial WebRTC Candidate Handling:
+        // Pass candidate init dictionary directly to addIceCandidate()
+        const candData = data.candidate;
+        if (candData && (candData.candidate !== undefined || typeof candData === 'object')) {
+          if (this.peerConnection && this.peerConnection.remoteDescription && this.peerConnection.remoteDescription.type) {
+            try {
+              await this.peerConnection.addIceCandidate(candData);
+            } catch (e) {
+              console.warn('Error adding ICE candidate:', e);
+            }
+          } else {
+            console.log('Buffering early ICE candidate until remote description is set...');
+            this.pendingCandidates.push(candData);
           }
-        } else {
-          console.log('Buffering early ICE candidate until remote description is set...');
-          this.pendingCandidates.push(candidate);
         }
       }
     } catch (err) {

@@ -330,19 +330,28 @@ class BoothApp {
       btnRetryCamera.addEventListener('click', () => this.requestCameraAccess());
     }
 
-    // --- AUTOPLAY UNLOCK ---
-    // Mobile browsers block autoplay until a user gesture occurs.
-    // This listener ensures audio/video resumes on the first tap after stream arrives.
-    document.addEventListener('click', () => {
+    // --- AUTOPLAY UNLOCK & USER INTERACTION RESUME ---
+    // Mobile browsers require a user gesture to start unmuted audio playback.
+    // Listening to click, touchstart, and pointerdown ensures audio and video streams
+    // resume instantly as soon as the user taps anywhere on the screen.
+    const unlockMediaPlayback = () => {
       const remoteVideo = document.getElementById('remote-video');
       if (remoteVideo && remoteVideo.srcObject && remoteVideo.paused) {
+        remoteVideo.muted = true;
         remoteVideo.play().catch(() => {});
       }
       const remoteAudio = document.getElementById('remote-audio');
       if (remoteAudio && remoteAudio.srcObject && remoteAudio.paused) {
-        remoteAudio.play().catch(() => {});
+        remoteAudio.play().then(() => {
+          const unmuteBanner = document.getElementById('btn-unmute-call');
+          if (unmuteBanner) unmuteBanner.classList.add('hidden');
+        }).catch(() => {});
       }
-    }, { passive: true });
+    };
+
+    document.addEventListener('click', unlockMediaPlayback, { passive: true });
+    document.addEventListener('touchstart', unlockMediaPlayback, { passive: true });
+    document.addEventListener('pointerdown', unlockMediaPlayback, { passive: true });
   }
 
   /**
@@ -789,9 +798,17 @@ class BoothApp {
   showPartnerVideo() {
     const placeholder = document.getElementById('remote-waiting-placeholder');
     const remoteVideo = document.getElementById('remote-video');
+    const remoteAudio = document.getElementById('remote-audio');
 
     if (placeholder) placeholder.classList.add('hidden');
-    if (remoteVideo) remoteVideo.classList.remove('hidden');
+    if (remoteVideo) {
+      remoteVideo.classList.remove('hidden');
+      remoteVideo.muted = true;
+      remoteVideo.play().catch(() => {});
+    }
+    if (remoteAudio && remoteAudio.srcObject && remoteAudio.paused) {
+      remoteAudio.play().catch(() => {});
+    }
   }
 
   /**
