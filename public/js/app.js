@@ -166,6 +166,16 @@ class BoothApp {
       btnWaitingConnect.addEventListener('click', () => this.reconnectPartnerMedia());
     }
 
+    const btnForceWebRtc = document.getElementById('btn-force-call-webrtc');
+    if (btnForceWebRtc) {
+      btnForceWebRtc.addEventListener('click', () => this.reconnectPartnerMedia());
+    }
+
+    const btnSwitchPeerJs = document.getElementById('btn-switch-peerjs');
+    if (btnSwitchPeerJs) {
+      btnSwitchPeerJs.addEventListener('click', () => this.signaling.requestSwitchToPeerJs());
+    }
+
     // Exit Booth
     const btnExit = document.getElementById('btn-exit-booth');
     if (btnExit) {
@@ -786,6 +796,33 @@ class BoothApp {
   // ─── UI State Helpers ─────────────────────────────────────────────────────
 
   /**
+   * Update live connection diagnostic panel
+   */
+  setDiag(key, text, status = '') {
+    const elMap = {
+      signaling: 'diag-signaling-val',
+      offer: 'diag-offer-val',
+      answer: 'diag-answer-val',
+      ice: 'diag-ice-val',
+      media: 'diag-media-val',
+      engine: 'diag-engine-badge'
+    };
+    const id = elMap[key];
+    if (!id) return;
+    const el = document.getElementById(id);
+    if (!el) return;
+
+    if (key === 'engine') {
+      el.textContent = `Engine: ${text}`;
+      return;
+    }
+
+    el.textContent = text;
+    el.className = 'diag-val';
+    if (status) el.classList.add(status);
+  }
+
+  /**
    * Update the partner status badge in the top nav and waiting card.
    */
   updatePartnerBadge(signalingConnected, videoLive) {
@@ -796,10 +833,13 @@ class BoothApp {
     const waitingCopy = document.getElementById('btn-waiting-copy');
     const waitingConnectBtn = document.getElementById('btn-waiting-connect-now');
     const waitingIcon = document.getElementById('waiting-icon');
+    const diagPanel = document.getElementById('connection-diag-panel');
 
     if (videoLive) {
       if (partnerPill) partnerPill.innerHTML = '<span class="status-dot green"></span> Live Call 🎥';
       if (reconnectBtn) reconnectBtn.classList.add('hidden');
+      if (diagPanel) diagPanel.classList.add('hidden');
+      this.setDiag('media', 'Live Video & Audio Connected! 🎥', 'ok');
     } else if (signalingConnected) {
       if (partnerPill) partnerPill.innerHTML = '<span class="status-dot yellow"></span> Partner in Booth 💕';
       if (reconnectBtn) reconnectBtn.classList.remove('hidden');
@@ -809,9 +849,24 @@ class BoothApp {
       if (waitingCopy) waitingCopy.classList.add('hidden');
       if (waitingConnectBtn) waitingConnectBtn.classList.remove('hidden');
       if (waitingIcon) waitingIcon.textContent = '🎥';
+      if (diagPanel) diagPanel.classList.remove('hidden');
+
+      this.setDiag('signaling', 'Connected (Partner in Room)', 'ok');
+      this.setDiag('engine', this.signaling.mode === 'peerjs' ? 'PeerJS Cloud' : 'WebSocket', 'ok');
+
+      // Auto-fallback watchdog: if still not live after 6 seconds, automatically switch to PeerJS Cloud
+      clearTimeout(this.mediaFallbackTimeout);
+      this.mediaFallbackTimeout = setTimeout(() => {
+        if (!this.isPartnerVideoLive && this.signaling.mode === 'websocket') {
+          console.warn('Direct WebRTC took >6s across network firewall. Auto-switching to PeerJS Cloud Relay...');
+          this.setDiag('ice', 'Direct P2P stalled. Auto-switching to Cloud Relay...', 'err');
+          this.signaling.requestSwitchToPeerJs();
+        }
+      }, 6000);
     } else {
       if (partnerPill) partnerPill.innerHTML = '<span class="status-dot yellow"></span> Waiting for Partner';
       if (reconnectBtn) reconnectBtn.classList.add('hidden');
+      if (diagPanel) diagPanel.classList.add('hidden');
 
       if (waitingTitle) waitingTitle.textContent = 'Waiting for Your Partner';
       if (waitingDesc) waitingDesc.textContent = 'Send them the room code or click below to copy the direct link:';

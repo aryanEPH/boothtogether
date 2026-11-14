@@ -451,6 +451,15 @@ function handleClientMessage(socket, rawMessage) {
       break;
     }
 
+    // Switch signaling engine to PeerJS Cloud fallback
+    case 'SWITCH_TO_PEERJS': {
+      broadcastToRoom(activeRoomId, socket, {
+        type: 'SWITCH_TO_PEERJS',
+        senderId: clientId
+      }, false);
+      break;
+    }
+
     // Partner chat message / cute whispers
     case 'SEND_MESSAGE': {
       broadcastToRoom(activeRoomId, socket, {

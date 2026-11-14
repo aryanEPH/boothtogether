@@ -202,8 +202,12 @@ class BoothWebRTC {
       const iceState = this.peerConnection.iceConnectionState;
       console.log(`WebRTC ICE Connection State: ${iceState}`);
       if (iceState === 'connected' || iceState === 'completed') {
+        window.boothApp?.setDiag('ice', 'Connected (P2P Route Active)', 'ok');
         this.hideWaitingPlaceholder();
+      } else if (iceState === 'checking') {
+        window.boothApp?.setDiag('ice', 'Checking routes (STUN/TURN)...');
       } else if (iceState === 'failed') {
+        window.boothApp?.setDiag('ice', 'Failed across network firewall', 'err');
         console.warn('ICE connection failed. Restarting ICE negotiation...');
         if (this.peerConnection.restartIce) {
           this.peerConnection.restartIce();
@@ -219,7 +223,10 @@ class BoothWebRTC {
         this.onConnectionStateChange(state);
       }
       if (state === 'connected') {
+        window.boothApp?.setDiag('ice', 'Connected (Live Call)', 'ok');
         this.hideWaitingPlaceholder();
+      } else if (state === 'failed') {
+        window.boothApp?.setDiag('ice', 'Connection Failed. Click Switch to Cloud Relay', 'err');
       }
     };
 
@@ -337,6 +344,7 @@ class BoothWebRTC {
     }
 
     try {
+      window.boothApp?.setDiag('offer', 'Creating offer...');
       await this.ensureLocalTracksAdded();
 
       console.log('Creating WebRTC Offer with audio & video...');
@@ -346,11 +354,20 @@ class BoothWebRTC {
       });
       await this.peerConnection.setLocalDescription(offer);
 
+      const sdpPayload = {
+        type: this.peerConnection.localDescription.type,
+        sdp: this.peerConnection.localDescription.sdp
+      };
+
       signalingClient.sendSignal({
-        desc: this.peerConnection.localDescription
+        desc: sdpPayload
       });
+
+      window.boothApp?.setDiag('offer', 'Sent Offer (Waiting Answer)', 'ok');
+      window.boothApp?.setDiag('ice', 'Gathering network routes...');
     } catch (err) {
       console.error('Error creating WebRTC offer:', err);
+      window.boothApp?.setDiag('offer', `Error: ${err.message}`, 'err');
     }
   }
 
@@ -364,10 +381,17 @@ class BoothWebRTC {
 
     try {
       if (data.desc) {
-        const desc = new RTCSessionDescription(data.desc);
+        const descInit = {
+          type: data.desc.type,
+          sdp: data.desc.sdp
+        };
+        const desc = new RTCSessionDescription(descInit);
 
         if (desc.type === 'offer') {
           console.log('Received WebRTC Offer from partner. Ensuring local tracks ready...');
+          window.boothApp?.setDiag('offer', 'Received Offer from partner', 'ok');
+          window.boothApp?.setDiag('answer', 'Creating answer...');
+
           await this.ensureLocalTracksAdded();
 
           console.log('Setting remote description (Offer)...');
@@ -383,30 +407,44 @@ class BoothWebRTC {
           });
           await this.peerConnection.setLocalDescription(answer);
 
+          const answerPayload = {
+            type: this.peerConnection.localDescription.type,
+            sdp: this.peerConnection.localDescription.sdp
+          };
+
           signalingClient.sendSignal({
-            desc: this.peerConnection.localDescription
+            desc: answerPayload
           });
+
+          window.boothApp?.setDiag('answer', 'Sent Answer to partner', 'ok');
+          window.boothApp?.setDiag('ice', 'Connecting ICE routes...');
         } else if (desc.type === 'answer') {
           console.log('Received WebRTC Answer from partner. Setting remote description...');
+          window.boothApp?.setDiag('answer', 'Received Answer from partner', 'ok');
           await this.peerConnection.setRemoteDescription(desc);
 
           // Flush any ICE candidates that arrived before the answer was set!
           await this.flushPendingCandidates();
+          window.boothApp?.setDiag('ice', 'Handshake done. Connecting P2P...');
         }
       } else if (data.candidate) {
         // Crucial WebRTC Candidate Handling:
-        // Pass candidate init dictionary directly to addIceCandidate()
         const candData = data.candidate;
         if (candData && candData.candidate && typeof candData.candidate === 'string' && candData.candidate.trim().length > 0) {
+          const candidateInit = {
+            candidate: candData.candidate,
+            sdpMid: candData.sdpMid,
+            sdpMLineIndex: candData.sdpMLineIndex !== undefined ? Number(candData.sdpMLineIndex) : 0
+          };
           if (this.peerConnection && this.peerConnection.remoteDescription && this.peerConnection.remoteDescription.type) {
             try {
-              await this.peerConnection.addIceCandidate(candData);
+              await this.peerConnection.addIceCandidate(candidateInit);
             } catch (e) {
               console.warn('Error adding ICE candidate:', e);
             }
           } else {
             console.log('Buffering early ICE candidate until remote description is set...');
-            this.pendingCandidates.push(candData);
+            this.pendingCandidates.push(candidateInit);
           }
         }
       }

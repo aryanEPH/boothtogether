@@ -1488,3 +1488,104 @@ input[type="range"]::-webkit-slider-thumb {
   50% { transform: scale(1.25); opacity: 1; }
   100% { transform: scale(1); opacity: 1; }
 }
+
+/* Live WebRTC Connection Diagnostic Card */
+.connection-diag-card {
+  width: 90%;
+  max-width: 320px;
+  background: rgba(18, 18, 22, 0.95);
+  border: 1px solid rgba(224, 90, 71, 0.35);
+  border-radius: var(--radius-md);
+  padding: 12px 14px;
+  margin-top: 12px;
+  text-align: left;
+  backdrop-filter: blur(10px);
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.6);
+  font-size: 0.72rem;
+  color: var(--text-main);
+  animation: fadeIn 0.3s ease;
+}
+
+.diag-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  padding-bottom: 4px;
+}
+
+.diag-title {
+  font-weight: 700;
+  font-size: 0.75rem;
+  color: var(--accent-coral);
+}
+
+.badge-mini {
+  background: rgba(255, 255, 255, 0.1);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 0.65rem;
+}
+
+.diag-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-bottom: 10px;
+}
+
+.diag-row {
+  display: flex;
+  justify-content: space-between;
+}
+
+.diag-label {
+  color: var(--text-muted);
+}
+
+.diag-val {
+  font-weight: 600;
+  color: #F59E0B;
+}
+
+.diag-val.ok {
+  color: #10B981;
+}
+
+.diag-val.err {
+  color: #EF4444;
+}
+
+.diag-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.btn-diag {
+  flex: 1;
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: #FFFFFF;
+  border-radius: 4px;
+  padding: 6px 8px;
+  font-size: 0.68rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.btn-diag:hover {
+  background: rgba(255, 255, 255, 0.15);
+}
+
+.btn-diag.accent {
+  background: rgba(224, 90, 71, 0.2);
+  border-color: var(--accent-coral);
+  color: var(--accent-coral);
+}
+
+.btn-diag.accent:hover {
+  background: var(--accent-coral);
+  color: #FFFFFF;
+}

@@ -233,6 +233,41 @@
                   <button id="btn-waiting-connect-now" class="btn-primary hidden" style="margin-top: 10px;">
                     🔄 Click to Connect Video Now
                   </button>
+
+                  <!-- Live WebRTC Connection Diagnostic Card -->
+                  <div id="connection-diag-panel" class="connection-diag-card hidden">
+                    <div class="diag-header">
+                      <span class="diag-title">⚡ Live Connection Diagnostic</span>
+                      <span id="diag-engine-badge" class="badge-mini">Engine: WebSocket</span>
+                    </div>
+                    <div class="diag-grid">
+                      <div class="diag-row">
+                        <span class="diag-label">Signaling:</span>
+                        <span class="diag-val" id="diag-signaling-val">Connected</span>
+                      </div>
+                      <div class="diag-row">
+                        <span class="diag-label">WebRTC Offer:</span>
+                        <span class="diag-val" id="diag-offer-val">Waiting...</span>
+                      </div>
+                      <div class="diag-row">
+                        <span class="diag-label">WebRTC Answer:</span>
+                        <span class="diag-val" id="diag-answer-val">Waiting...</span>
+                      </div>
+                      <div class="diag-row">
+                        <span class="diag-label">ICE Route:</span>
+                        <span class="diag-val" id="diag-ice-val">Waiting...</span>
+                      </div>
+                      <div class="diag-row">
+                        <span class="diag-label">Remote Stream:</span>
+                        <span class="diag-val" id="diag-media-val">Waiting for track...</span>
+                      </div>
+                    </div>
+                    <div class="diag-actions">
+                      <button id="btn-force-call-webrtc" class="btn-diag">🔄 Retry WebRTC</button>
+                      <button id="btn-switch-peerjs" class="btn-diag accent">☁️ Switch to PeerJS Cloud</button>
+                    </div>
+                  </div>
+
                   <div class="solo-tip">
                     <span>Testing solo? You can still snap strips with our companion mirror!</span>
                   </div>

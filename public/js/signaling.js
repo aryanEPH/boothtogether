@@ -471,10 +471,28 @@ class BoothSignaling {
     this.send('SEND_REACTION', { emoji, x, y });
   }
 
+  requestSwitchToPeerJs() {
+    console.log('Requesting switch to PeerJS Cloud for both peers...');
+    this.send('SWITCH_TO_PEERJS', {});
+    this.switchToPeerJsMode();
+    if (window.boothApp) {
+      window.boothApp.setDiag('engine', 'PeerJS Cloud', 'ok');
+      window.boothApp.showToast('Switched to PeerJS Cloud Relay ☁️', 'info');
+    }
+  }
+
   handleServerMessage(msg) {
     const { type, payload } = msg;
 
     switch (type) {
+      case 'SWITCH_TO_PEERJS':
+        console.log('Partner requested switch to PeerJS Cloud relay...');
+        this.switchToPeerJsMode();
+        if (window.boothApp) {
+          window.boothApp.setDiag('engine', 'PeerJS Cloud', 'ok');
+          window.boothApp.showToast('Connecting via PeerJS Cloud Relay ☁️', 'info');
+        }
+        break;
       case 'JOINED_SUCCESS':
         this.role = msg.role;
         this.emit('room_joined', msg);
