@@ -1,13 +1,21 @@
 /**
  * BoothTogether - Main Application Coordinator
  * Handles UI interactions, room pairing, synchronized shutter countdown,
- * screen flashlight mode, and photo strip export modal.
+ * screen flashlight mode, two-way live video call, and photo strip export modal.
+ *
+ * FIX LOG:
+ * - Decouple peer_joined (shows "partner connected" badge) from actual video stream arrival
+ *   (setPartnerStatusConnected(true) with video element only on onRemoteTrackReceived)
+ * - In PeerJS mode, block native WebRTC createAndSendOffer from triggering
+ * - Volume slider bound to webrtc.setPartnerVolume()
+ * - Autoplay unlock click listener for mobile browser policy
  */
 
 class BoothApp {
   constructor() {
     this.roomId = null;
-    this.isPartnerConnected = false;
+    this.isPartnerSignalingConnected = false;  // Partner joined signaling (badge)
+    this.isPartnerVideoLive = false;           // Partner video track is actually rendering
     this.isFlashlightOn = false;
     this.activeShotMode = 'strip3'; // 'single', 'strip3', 'strip4'
     this.countdownTimer = null;
@@ -33,6 +41,7 @@ class BoothApp {
 
   /**
    * Check if URL has a room code (?room=ABC123 or #ABC123)
+   * When a partner receives a share link, they auto-join as guest (isCreator = false)
    */
   checkUrlForRoom() {
     const params = new URLSearchParams(window.location.search);
@@ -43,13 +52,13 @@ class BoothApp {
 
     if (code && code.trim().length === 6) {
       const sanitized = code.trim().toUpperCase();
-      console.log(`Auto-joining room from URL: ${sanitized}`);
-      this.joinBooth(sanitized);
+      console.log(`Auto-joining room from URL: ${sanitized} (as guest)`);
+      this.joinBooth(sanitized, false); // Share link = join as guest
     }
   }
 
   /**
-   * Generate friendly 6-character room code (avoiding confusing chars like 0, O, 1, I)
+   * Generate friendly 6-character room code (excluding ambiguous chars 0 O 1 I)
    */
   generateRoomCode() {
     const chars = '23456789ABCDEFGHJKLMNPQRSTUVWXYZ';
@@ -61,10 +70,10 @@ class BoothApp {
   }
 
   /**
-   * Bind DOM event listeners
+   * Bind all DOM event listeners
    */
   bindDomEvents() {
-    // 1. Landing Screen Events
+    // --- LANDING SCREEN ---
     const btnCreateRoom = document.getElementById('btn-create-booth');
     if (btnCreateRoom) {
       btnCreateRoom.addEventListener('click', () => {
@@ -79,20 +88,25 @@ class BoothApp {
       btnJoinRoom.addEventListener('click', () => {
         const code = inputJoinCode.value.trim().toUpperCase();
         if (code.length === 6) {
-          this.joinBooth(code, false);
+          this.joinBooth(code, false); // Joining via input = guest
         } else {
           this.showToast('Please enter a valid 6-character room code.', 'error');
         }
       });
 
       inputJoinCode.addEventListener('keyup', (e) => {
-        if (e.key === 'Enter') {
-          btnJoinRoom.click();
-        }
+        if (e.key === 'Enter') btnJoinRoom.click();
+      });
+
+      // Auto-uppercase as the user types
+      inputJoinCode.addEventListener('input', (e) => {
+        const pos = e.target.selectionStart;
+        e.target.value = e.target.value.toUpperCase();
+        e.target.setSelectionRange(pos, pos);
       });
     }
 
-    // Copy Link Buttons
+    // Copy Link Buttons (delegated - multiple in DOM)
     document.addEventListener('click', (e) => {
       const copyBtn = e.target.closest('.btn-copy-link');
       if (copyBtn) {
@@ -101,15 +115,15 @@ class BoothApp {
       }
     });
 
-    // 2. Screen Flashlight (Ring Light Mode) Toggle
+    // --- BOOTH NAVBAR CONTROLS ---
+
+    // Screen Flashlight (Ring Light Mode)
     const btnFlashlight = document.getElementById('btn-flashlight-toggle');
     if (btnFlashlight) {
-      btnFlashlight.addEventListener('click', () => {
-        this.toggleFlashlight();
-      });
+      btnFlashlight.addEventListener('click', () => this.toggleFlashlight());
     }
 
-    // 3. Audio Mute Toggle
+    // Microphone Mute Toggle
     const btnMute = document.getElementById('btn-mute-toggle');
     if (btnMute) {
       btnMute.addEventListener('click', () => {
@@ -118,32 +132,42 @@ class BoothApp {
         btnMute.title = isMuted ? 'Unmute Mic' : 'Mute Mic';
         const icon = btnMute.querySelector('.icon');
         if (icon) icon.textContent = isMuted ? '🔇' : '🎙️';
-        this.showToast(isMuted ? 'Microphone Muted' : 'Microphone Active');
+        this.showToast(isMuted ? '🔇 Microphone Muted' : '🎙️ Microphone Active');
       });
     }
 
-    // 4. Flip Camera (Mobile)
+    // Partner Voice Volume Slider
+    const volumeSlider = document.getElementById('remote-volume-slider');
+    if (volumeSlider) {
+      volumeSlider.addEventListener('input', (e) => {
+        this.webrtc.setPartnerVolume(Number(e.target.value));
+      });
+    }
+
+    // Flip Camera (Mobile front/back switch)
     const btnFlip = document.getElementById('btn-flip-camera');
     if (btnFlip) {
       btnFlip.addEventListener('click', async () => {
         btnFlip.classList.add('spinning');
         await this.webrtc.flipCamera();
-        btnFlip.classList.remove('spinning');
-        this.showToast('Camera flipped');
+        setTimeout(() => btnFlip.classList.remove('spinning'), 500);
+        this.showToast('Camera flipped!');
       });
     }
 
-    // 5. Exit Booth / Back to Landing
+    // Exit Booth
     const btnExit = document.getElementById('btn-exit-booth');
     if (btnExit) {
       btnExit.addEventListener('click', () => {
         if (confirm('Leave this photobooth?')) {
+          this.webrtc.cleanup();
           window.location.href = window.location.pathname;
         }
       });
     }
 
-    // 6. Shutter Button & Mode Selectors
+    // --- SHUTTER & CAPTURE ---
+
     const btnShutter = document.getElementById('btn-shutter');
     if (btnShutter) {
       btnShutter.addEventListener('click', () => {
@@ -152,11 +176,11 @@ class BoothApp {
       });
     }
 
-    // Cancel Countdown Button
     const btnCancelCountdown = document.getElementById('btn-cancel-countdown');
     if (btnCancelCountdown) {
       btnCancelCountdown.addEventListener('click', () => {
         this.signaling.cancelCountdown();
+        this.stopCountdown('Countdown cancelled');
       });
     }
 
@@ -171,7 +195,8 @@ class BoothApp {
       });
     });
 
-    // 7. Filter Controls (Presets & Brightness Slider)
+    // --- FILTER CONTROLS ---
+
     const filterChips = document.querySelectorAll('.filter-chip');
     filterChips.forEach(chip => {
       chip.addEventListener('click', () => {
@@ -202,17 +227,20 @@ class BoothApp {
       });
     }
 
-    // 8. Love Reactions Bar (Hearts, Sparkles, Kisses)
+    // --- LOVE REACTIONS ---
+
     const reactionButtons = document.querySelectorAll('.reaction-btn');
     reactionButtons.forEach(btn => {
       btn.addEventListener('click', () => {
         const emoji = btn.dataset.emoji || '❤️';
         this.audio.playReactionPop();
+        this.showFloatingReaction(emoji, 0.2 + Math.random() * 0.6, 0.3 + Math.random() * 0.4);
         this.signaling.sendReaction(emoji, 0.2 + Math.random() * 0.6, 0.3 + Math.random() * 0.4);
       });
     });
 
-    // 9. Photo Strip Customization Modal Controls
+    // --- PHOTO STRIP MODAL ---
+
     const themeSwatches = document.querySelectorAll('.theme-swatch');
     themeSwatches.forEach(swatch => {
       swatch.addEventListener('click', () => {
@@ -239,26 +267,22 @@ class BoothApp {
       });
     }
 
-    // Sticker checkboxes
     const stickerCheckboxes = document.querySelectorAll('.sticker-check');
     stickerCheckboxes.forEach(chk => {
       chk.addEventListener('change', () => {
         const active = [];
-        stickerCheckboxes.forEach(c => {
-          if (c.checked) active.push(c.value);
-        });
+        stickerCheckboxes.forEach(c => { if (c.checked) active.push(c.value); });
         this.photostrip.activeStickers = active;
         this.updateStripPreview();
       });
     });
 
-    // Export Action Buttons
     const btnDownloadJpg = document.getElementById('btn-download-jpg');
     if (btnDownloadJpg) {
       btnDownloadJpg.addEventListener('click', () => {
         this.photostrip.downloadJpg(this.roomId);
         this.triggerConfetti();
-        this.showToast('Downloading Photo Strip JPG! ✨');
+        this.showToast('📥 Downloading Photo Strip JPG!');
       });
     }
 
@@ -269,7 +293,7 @@ class BoothApp {
         await this.photostrip.downloadPdf(this.roomId);
         btnDownloadPdf.classList.remove('loading');
         this.triggerConfetti();
-        this.showToast('Generating Print-Ready PDF! 📄');
+        this.showToast('📄 Generating Print-Ready PDF!');
       });
     }
 
@@ -278,36 +302,47 @@ class BoothApp {
       btnCopyImage.addEventListener('click', async () => {
         try {
           await this.photostrip.copyToClipboard();
-          this.showToast('Photo Strip copied to clipboard! Ready to paste 💕');
+          this.showToast('📋 Photo Strip copied to clipboard! Paste it anywhere 💕');
         } catch (err) {
-          this.showToast('Clipboard copy failed. Please use Download JPG.', 'error');
+          this.showToast('Clipboard copy failed — use Download JPG instead.', 'error');
         }
       });
     }
 
     const btnRetake = document.getElementById('btn-retake-strip');
     if (btnRetake) {
-      btnRetake.addEventListener('click', () => {
-        this.closeStripModal();
-      });
+      btnRetake.addEventListener('click', () => this.closeStripModal());
     }
 
-    // Fallback / Demo Mode Toggle
+    // --- CAMERA PERMISSION FALLBACK ---
+
     const btnUseDemoMode = document.getElementById('btn-use-demo-mode');
     if (btnUseDemoMode) {
       btnUseDemoMode.addEventListener('click', () => {
         this.webrtc.startDemoStream();
         this.hidePermissionOverlay();
-        this.showToast('Virtual test camera active! Ready to test.', 'info');
+        this.showToast('Virtual test camera active!', 'info');
       });
     }
 
     const btnRetryCamera = document.getElementById('btn-retry-camera');
     if (btnRetryCamera) {
-      btnRetryCamera.addEventListener('click', () => {
-        this.requestCameraAccess();
-      });
+      btnRetryCamera.addEventListener('click', () => this.requestCameraAccess());
     }
+
+    // --- AUTOPLAY UNLOCK ---
+    // Mobile browsers block autoplay until a user gesture occurs.
+    // This listener ensures audio/video resumes on the first tap after stream arrives.
+    document.addEventListener('click', () => {
+      const remoteVideo = document.getElementById('remote-video');
+      if (remoteVideo && remoteVideo.srcObject && remoteVideo.paused) {
+        remoteVideo.play().catch(() => {});
+      }
+      const remoteAudio = document.getElementById('remote-audio');
+      if (remoteAudio && remoteAudio.srcObject && remoteAudio.paused) {
+        remoteAudio.play().catch(() => {});
+      }
+    }, { passive: true });
   }
 
   /**
@@ -315,94 +350,123 @@ class BoothApp {
    */
   setupSignalingEvents() {
     this.signaling.on('room_joined', (msg) => {
-      console.log('Room joined successfully:', msg);
+      console.log('Room joined:', msg);
       this.updateRoomBadge(msg.roomId);
       this.updateUserCount(msg.userCount);
     });
 
     this.signaling.on('room_full', (msg) => {
-      alert(msg.message);
+      alert(msg.message || 'This booth is full!');
       this.switchToLandingScreen();
     });
 
     this.signaling.on('peer_joined', async (msg) => {
-      console.log('Peer joined booth:', msg);
-      this.isPartnerConnected = true;
+      console.log('Partner joined signaling:', msg);
+      this.isPartnerSignalingConnected = true;
       this.audio.playPartnerJoinedChime();
       this.showToast(`${msg.peerName || 'Your partner'} entered the booth! 💕`, 'success');
-      this.setPartnerStatusConnected(true);
 
-      // If initiator, create WebRTC offer
-      if (msg.shouldInitiateOffer) {
+      // Update status badge — but do NOT show video yet (video comes via WebRTC track event)
+      this.updatePartnerBadge(true, false);
+
+      // Only trigger native WebRTC offer in WebSocket mode.
+      // In PeerJS mode the media call is handled entirely by signaling.js → connectToPeer()
+      if (this.signaling.mode !== 'peerjs' && msg.shouldInitiateOffer) {
+        console.log('WebSocket mode: Creating WebRTC offer as initiator...');
         await this.webrtc.createAndSendOffer(this.signaling);
       }
     });
 
-    this.signaling.on('peer_left', (msg) => {
-      console.log('Partner left booth:', msg);
-      this.isPartnerConnected = false;
+    this.signaling.on('peer_left', () => {
+      console.log('Partner disconnected');
+      this.isPartnerSignalingConnected = false;
+      this.isPartnerVideoLive = false;
       this.showToast('Your partner stepped out of the booth.', 'info');
-      this.setPartnerStatusConnected(false);
+      this.updatePartnerBadge(false, false);
+      this.hidePartnerVideo();
     });
 
+    // Native WebRTC signaling relay (WebSocket mode only)
     this.signaling.on('signal', async (signalData) => {
       await this.webrtc.handleSignalingData(this.signaling, signalData);
     });
 
-    // Synchronized Countdown Shutter
+    // Synchronized countdown shutter
     this.signaling.on('countdown_start', (msg) => {
       this.runSyncedCountdownSequence(msg);
     });
 
     this.signaling.on('countdown_cancelled', () => {
-      this.stopCountdown('Countdown cancelled');
+      this.stopCountdown('Countdown cancelled by partner');
     });
 
-    // Sync partner state updates
+    // Filter sync
     this.signaling.on('filter_updated', (msg) => {
       this.filters.handleRemoteFilterUpdate(msg);
     });
 
+    // Flashlight sync
     this.signaling.on('flashlight_updated', (msg) => {
-      if (msg.active !== this.isFlashlightOn) {
-        this.toggleFlashlight(msg.active, false); // Don't bounce back
+      const active = msg.active !== undefined ? msg.active : (msg.payload && msg.payload.active);
+      if (active !== undefined && active !== this.isFlashlightOn) {
+        this.toggleFlashlight(active, false);
       }
     });
 
+    // Strip config sync
     this.signaling.on('strip_config_updated', (msg) => {
-      if (msg.config?.shotMode) {
-        this.activeShotMode = msg.config.shotMode;
+      const shotMode = msg.shotMode || (msg.config && msg.config.shotMode);
+      if (shotMode) {
+        this.activeShotMode = shotMode;
         document.querySelectorAll('.mode-chip').forEach(chip => {
-          chip.classList.toggle('active', chip.dataset.mode === this.activeShotMode);
+          chip.classList.toggle('active', chip.dataset.mode === shotMode);
         });
       }
     });
 
+    // Love reactions
     this.signaling.on('reaction_received', (msg) => {
-      this.showFloatingReaction(msg.emoji, msg.x, msg.y);
+      const emoji = msg.emoji || (msg.payload && msg.payload.emoji) || '❤️';
+      const x = msg.x !== undefined ? msg.x : (msg.payload && msg.payload.x) || 0.5;
+      const y = msg.y !== undefined ? msg.y : (msg.payload && msg.payload.y) || 0.5;
+      this.showFloatingReaction(emoji, x, y);
     });
 
     this.signaling.on('error_message', (msg) => {
-      this.showToast(msg, 'error');
+      this.showToast(typeof msg === 'string' ? msg : (msg.message || 'Connection error'), 'error');
     });
   }
 
+  /**
+   * Setup WebRTC event callbacks.
+   * onRemoteTrackReceived fires when the actual video/audio track arrives —
+   * this is the correct moment to show the remote video element.
+   */
   setupWebRtcEvents() {
-    this.webrtc.onRemoteTrackReceived = () => {
-      console.log('WebRTC Remote track connected to video');
-      this.setPartnerStatusConnected(true);
+    this.webrtc.onRemoteTrackReceived = (stream) => {
+      console.log('>>> WebRTC remote stream received! Showing partner video.');
+      this.isPartnerVideoLive = true;
+      this.updatePartnerBadge(true, true);
+      this.showPartnerVideo();
     };
 
     this.webrtc.onConnectionStateChange = (state) => {
-      const connPill = document.getElementById('connection-status-pill');
-      if (connPill) {
-        if (state === 'connected') {
-          connPill.innerHTML = '<span class="status-dot green"></span> Live';
-        } else if (state === 'connecting') {
-          connPill.innerHTML = '<span class="status-dot yellow"></span> Connecting...';
-        } else if (state === 'disconnected' || state === 'failed') {
-          connPill.innerHTML = '<span class="status-dot red"></span> Disconnected';
+      console.log('WebRTC connection state changed to:', state);
+      const partnerPill = document.getElementById('partner-status-badge');
+
+      if (state === 'connected') {
+        this.showToast('🟢 Video call connected!', 'success');
+        if (partnerPill) {
+          partnerPill.innerHTML = '<span class="status-dot green"></span> Live Call 🎥';
         }
+      } else if (state === 'disconnected' || state === 'failed') {
+        if (partnerPill) {
+          partnerPill.innerHTML = '<span class="status-dot red"></span> Reconnecting...';
+        }
+      } else if (state === 'closed') {
+        this.isPartnerVideoLive = false;
+        this.updatePartnerBadge(this.isPartnerSignalingConnected, false);
+        this.hidePartnerVideo();
       }
     };
   }
@@ -426,48 +490,47 @@ class BoothApp {
     if (codeDisplay) codeDisplay.textContent = roomCode;
     if (card) card.classList.remove('hidden');
 
-    const copyBtn = card.querySelector('.btn-copy-link');
+    const copyBtn = card ? card.querySelector('.btn-copy-link') : null;
     if (copyBtn) copyBtn.dataset.code = roomCode;
 
     if (btnEnter) {
-      btnEnter.onclick = () => {
-        this.joinBooth(roomCode, true);
-      };
+      btnEnter.onclick = () => this.joinBooth(roomCode, true);
     }
   }
 
   /**
-   * Enter Booth Screen and establish connection
+   * Enter Booth: transition UI, start camera, connect signaling.
+   * isCreator = true  → "Create a Booth" button (PeerJS host peer ID)
+   * isCreator = false → "Join a Booth" / share link (PeerJS guest peer ID)
    */
   async joinBooth(roomCode, isCreator = false) {
     this.roomId = roomCode;
     window.location.hash = roomCode;
 
-    // Transition UI
     document.getElementById('landing-screen').classList.add('hidden');
     document.getElementById('booth-screen').classList.remove('hidden');
 
     this.updateRoomBadge(roomCode);
-    this.setPartnerStatusConnected(false);
+    this.updatePartnerBadge(false, false);
+    this.hidePartnerVideo();
 
-    // Initialize Web Audio context on user gesture
     this.audio.init();
 
-    // Start Camera Feed
+    // Start local camera + mic
     await this.requestCameraAccess();
 
-    // Connect to WebSocket signaling server (or PeerJS cloud on GitHub Pages)
+    // Connect to signaling (WebSocket on local/Render, PeerJS on GitHub Pages)
     try {
       await this.signaling.connect();
       this.signaling.joinRoom(roomCode, 'Partner', isCreator);
     } catch (err) {
       console.error('Signaling connection error:', err);
-      this.showToast('Could not connect to signaling server. Operating in offline demo mode.', 'error');
+      this.showToast('Connection error. Try refreshing both devices.', 'error');
     }
   }
 
   /**
-   * Request webcam access with fallback overlay
+   * Request webcam + mic with graceful fallback
    */
   async requestCameraAccess() {
     try {
@@ -475,12 +538,12 @@ class BoothApp {
       await this.webrtc.startLocalMedia();
       this.filters.applyFilters();
     } catch (err) {
-      console.warn('Camera permission denied or not available:', err);
-      this.showPermissionOverlay(err);
+      console.warn('Camera/Mic access failed:', err);
+      this.showPermissionOverlay();
     }
   }
 
-  showPermissionOverlay(err) {
+  showPermissionOverlay() {
     const overlay = document.getElementById('permission-overlay');
     if (overlay) overlay.classList.remove('hidden');
   }
@@ -491,62 +554,63 @@ class BoothApp {
   }
 
   /**
-   * Copy Booth Invite Link
+   * Copy Booth Invite Link to clipboard
    */
   copyInviteLink(code) {
+    if (!code) return;
     const url = `${window.location.origin}${window.location.pathname}?room=${code}`;
     navigator.clipboard.writeText(url).then(() => {
       this.showToast(`Booth link copied! Send it to your partner 💕`, 'success');
     }).catch(() => {
-      // Fallback
       prompt('Copy this booth invite link:', url);
     });
   }
 
   /**
-   * Toggle Screen Flashlight Mode (Ring Light)
+   * Toggle Screen Flashlight (Beauty Ring Light) Mode
    */
   toggleFlashlight(forceState = null, notifyPartner = true) {
     this.isFlashlightOn = forceState !== null ? forceState : !this.isFlashlightOn;
 
     document.body.classList.toggle('flashlight-mode', this.isFlashlightOn);
     const wrapper = document.getElementById('flashlight-wrapper');
-    if (wrapper) {
-      wrapper.classList.toggle('flashlight-active', this.isFlashlightOn);
-    }
+    if (wrapper) wrapper.classList.toggle('flashlight-active', this.isFlashlightOn);
 
     const btn = document.getElementById('btn-flashlight-toggle');
     if (btn) {
       btn.classList.toggle('active', this.isFlashlightOn);
-      btn.title = this.isFlashlightOn ? 'Turn Off Screen Flashlight' : 'Turn On Screen Flashlight (Ring Light)';
+      btn.title = this.isFlashlightOn ? 'Turn Off Ring Light' : 'Turn On Screen Flashlight (Ring Light)';
     }
 
     if (notifyPartner && this.roomId) {
       this.signaling.syncFlashlight(this.isFlashlightOn);
     }
 
-    this.showToast(this.isFlashlightOn ? '💡 Ring Light Mode: ON (Illuminating your face)' : '🌙 Ring Light Mode: OFF');
+    this.showToast(this.isFlashlightOn
+      ? '💡 Ring Light ON — illuminating your face!'
+      : '🌙 Ring Light OFF');
   }
 
   /**
-   * Start Shutter Countdown (Single or Multi-Shot)
+   * Trigger shutter countdown
    */
   triggerShutterCountdown() {
     if (this.isCapturing) return;
-
-    // Reset captured shots
     this.photostrip.reset();
-
     const shotCount = this.activeShotMode === 'strip4' ? 4 : (this.activeShotMode === 'strip3' ? 3 : 1);
     this.signaling.triggerCountdown(this.activeShotMode, shotCount, 0);
   }
 
   /**
-   * Execute Synced Countdown Sequence
+   * Run synchronized countdown sequence (called on BOTH devices simultaneously)
    */
   async runSyncedCountdownSequence(msg) {
+    if (this.isCapturing && (msg.shotIndex || 0) === 0) return; // Avoid double-trigger on first shot
     this.isCapturing = true;
-    const { shotMode, shotCount, shotIndex } = msg;
+
+    const shotMode = msg.shotMode || this.activeShotMode;
+    const shotCount = msg.shotCount || 1;
+    const shotIndex = msg.shotIndex || 0;
 
     const overlay = document.getElementById('countdown-overlay');
     const numberDisplay = document.getElementById('countdown-number');
@@ -554,60 +618,54 @@ class BoothApp {
 
     if (overlay) overlay.classList.remove('hidden');
     if (badgeDisplay) {
-      badgeDisplay.textContent = shotCount > 1 ? `Pose ${shotIndex + 1} of ${shotCount}` : 'Dual Snapshot';
+      badgeDisplay.textContent = shotCount > 1
+        ? `Pose ${shotIndex + 1} of ${shotCount}`
+        : '📸 Dual Snapshot';
     }
 
-    // Countdown: 3, 2, 1
+    // 3... 2... 1...
     for (let count = 3; count >= 1; count--) {
       if (numberDisplay) {
         numberDisplay.textContent = count;
         numberDisplay.classList.remove('pulse-anim');
-        void numberDisplay.offsetWidth; // Trigger reflow
+        void numberDisplay.offsetWidth; // force reflow for re-animation
         numberDisplay.classList.add('pulse-anim');
       }
       this.audio.playCountdownBeep(count === 1);
       await this.sleep(1000);
-      if (!this.isCapturing) return; // Cancelled
+      if (!this.isCapturing) return; // Cancelled mid-countdown
     }
 
     // SMILE!
-    if (numberDisplay) {
-      numberDisplay.textContent = 'SMILE! 📸';
-    }
-
-    // Flash & Shutter
+    if (numberDisplay) numberDisplay.textContent = 'SMILE! 📸';
     this.triggerFlashAndCapture(shotIndex + 1, shotCount);
 
     await this.sleep(600);
     if (overlay) overlay.classList.add('hidden');
 
-    // Handle Next Shot in Multi-Shot sequence
+    // Multi-shot: continue to next pose
     const nextIndex = shotIndex + 1;
     if (nextIndex < shotCount) {
-      // Show brief 2-second preparation pause between shots
       this.showPosePrepBanner(nextIndex + 1, shotCount);
-      await this.sleep(2000);
+      await this.sleep(2200);
       this.hidePosePrepBanner();
 
-      // Trigger next shot
-      if (this.signaling.role === 'initiator' || !this.isPartnerConnected) {
+      // Only the person who first pressed SNAP re-triggers to stay in sync
+      if (this.signaling.role === 'initiator' || !this.isPartnerSignalingConnected) {
         this.signaling.triggerCountdown(shotMode, shotCount, nextIndex);
       }
     } else {
-      // All shots completed! Open strip preview modal
       this.isCapturing = false;
       this.openStripModal();
     }
   }
 
   /**
-   * Flash Screen and snapshot both video frames onto canvas
+   * Flash screen white, play shutter sound, capture frame from both video elements
    */
   triggerFlashAndCapture(shotNum, totalShots) {
-    // 1. Shutter Sound
     this.audio.playShutterSound();
 
-    // 2. Fullscreen flash animation
     const flashEl = document.getElementById('flash-screen');
     if (flashEl) {
       flashEl.classList.remove('flash-anim');
@@ -615,18 +673,17 @@ class BoothApp {
       flashEl.classList.add('flash-anim');
     }
 
-    // 3. Grab pixels from local and remote videos
     const localVideo = document.getElementById('local-video');
     const remoteVideo = document.getElementById('remote-video');
     this.photostrip.captureCurrentFrame(localVideo, remoteVideo, this.filters);
 
-    this.showToast(`📸 Captured Pose ${shotNum} of ${totalShots}!`, 'success');
+    this.showToast(`📸 Pose ${shotNum} of ${totalShots} captured!`, 'success');
   }
 
   showPosePrepBanner(nextPose, totalPoses) {
     const banner = document.getElementById('prep-banner');
     if (banner) {
-      banner.textContent = `Get ready for Pose ${nextPose} of ${totalPoses}! 💕`;
+      banner.textContent = `✨ Get ready for Pose ${nextPose} of ${totalPoses}!`;
       banner.classList.remove('hidden');
     }
   }
@@ -647,19 +704,19 @@ class BoothApp {
   }
 
   /**
-   * Open the Photo Strip Customization & Export Modal
+   * Open Photo Strip modal and render the composite
    */
   openStripModal() {
     this.updateStripPreview();
     const modal = document.getElementById('strip-modal');
     if (modal) modal.classList.remove('hidden');
-
     this.triggerConfetti();
   }
 
   closeStripModal() {
     const modal = document.getElementById('strip-modal');
     if (modal) modal.classList.add('hidden');
+    this.isCapturing = false;
   }
 
   updateStripPreview() {
@@ -677,7 +734,7 @@ class BoothApp {
   }
 
   /**
-   * Show floating love reactions across both screens
+   * Show floating emoji reaction on screen
    */
   showFloatingReaction(emoji, xPct, yPct) {
     const container = document.getElementById('reactions-layer');
@@ -688,19 +745,13 @@ class BoothApp {
     el.textContent = emoji;
     el.style.left = `${Math.round(xPct * 100)}%`;
     el.style.top = `${Math.round(yPct * 100)}%`;
-
     container.appendChild(el);
 
     setTimeout(() => {
-      if (el.parentNode) {
-        el.parentNode.removeChild(el);
-      }
+      if (el.parentNode) el.parentNode.removeChild(el);
     }, 2800);
   }
 
-  /**
-   * Confetti celebration
-   */
   triggerConfetti() {
     if (window.confetti) {
       window.confetti({
@@ -712,24 +763,59 @@ class BoothApp {
     }
   }
 
-  // UI State helpers
-  setPartnerStatusConnected(connected) {
-    const placeholder = document.getElementById('remote-waiting-placeholder');
-    const remoteVideo = document.getElementById('remote-video');
-    const partnerPill = document.getElementById('partner-status-badge');
+  // ─── UI State Helpers ─────────────────────────────────────────────────────
 
-    if (placeholder) placeholder.classList.toggle('hidden', connected);
-    if (remoteVideo) remoteVideo.classList.toggle('hidden', !connected);
-    if (partnerPill) {
-      partnerPill.innerHTML = connected
-        ? '<span class="status-dot green"></span> Partner Connected 💕'
-        : '<span class="status-dot yellow"></span> Waiting for Partner';
+  /**
+   * Update the partner status badge in the top nav.
+   * signaling = partner joined the room (shows their name)
+   * video = partner's video stream is actually live
+   */
+  updatePartnerBadge(signalingConnected, videoLive) {
+    const partnerPill = document.getElementById('partner-status-badge');
+    if (!partnerPill) return;
+
+    if (videoLive) {
+      partnerPill.innerHTML = '<span class="status-dot green"></span> Live Call 🎥';
+    } else if (signalingConnected) {
+      partnerPill.innerHTML = '<span class="status-dot yellow"></span> Partner in Booth 💕';
+    } else {
+      partnerPill.innerHTML = '<span class="status-dot yellow"></span> Waiting for Partner';
     }
   }
 
+  /**
+   * Show the partner video element and hide the waiting placeholder
+   */
+  showPartnerVideo() {
+    const placeholder = document.getElementById('remote-waiting-placeholder');
+    const remoteVideo = document.getElementById('remote-video');
+
+    if (placeholder) placeholder.classList.add('hidden');
+    if (remoteVideo) remoteVideo.classList.remove('hidden');
+  }
+
+  /**
+   * Hide the partner video and show the waiting placeholder
+   */
+  hidePartnerVideo() {
+    const placeholder = document.getElementById('remote-waiting-placeholder');
+    const remoteVideo = document.getElementById('remote-video');
+    const remoteAudio = document.getElementById('remote-audio');
+    const unmuteBanner = document.getElementById('btn-unmute-call');
+
+    if (placeholder) placeholder.classList.remove('hidden');
+    if (remoteVideo) {
+      remoteVideo.classList.add('hidden');
+      remoteVideo.srcObject = null;
+    }
+    if (remoteAudio) remoteAudio.srcObject = null;
+    if (unmuteBanner) unmuteBanner.classList.add('hidden');
+  }
+
   updateRoomBadge(roomId) {
-    const badges = document.querySelectorAll('.room-code-badge');
-    badges.forEach(b => b.textContent = `#${roomId}`);
+    document.querySelectorAll('.room-code-badge').forEach(b => {
+      b.textContent = `#${roomId}`;
+    });
   }
 
   updateUserCount(count) {
@@ -744,13 +830,13 @@ class BoothApp {
   }
 
   showToast(message, type = 'info') {
-    const toastContainer = document.getElementById('toast-container');
-    if (!toastContainer) return;
+    const container = document.getElementById('toast-container');
+    if (!container) return;
 
     const toast = document.createElement('div');
     toast.className = `booth-toast toast-${type}`;
     toast.textContent = message;
-    toastContainer.appendChild(toast);
+    container.appendChild(toast);
 
     setTimeout(() => {
       toast.classList.add('fade-out');

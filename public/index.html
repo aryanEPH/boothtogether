@@ -173,6 +173,12 @@
             <span class="icon">🎙️</span>
           </button>
 
+          <!-- Partner Voice Volume Slider -->
+          <div class="nav-volume-group" title="Partner Call Volume">
+            <span class="volume-icon">🔊</span>
+            <input type="range" id="remote-volume-slider" min="0" max="100" value="100" />
+          </div>
+
           <!-- Camera Switcher (Mobile) -->
           <button id="btn-flip-camera" class="nav-icon-btn" title="Flip Camera">
             <span class="icon">🔄</span>
@@ -202,8 +208,8 @@
             <div class="video-card local-card">
               <div class="video-wrapper">
                 <video id="local-video" class="booth-video mirrored" autoplay playsinline muted></video>
-                <div class="video-badge">
-                  <span class="badge-dot"></span> You
+                <div class="video-badge" id="local-user-badge">
+                  <span class="badge-dot"></span> <span id="local-speaking-label">You</span>
                 </div>
               </div>
             </div>
@@ -228,8 +234,14 @@
 
                 <!-- Live Partner Video -->
                 <video id="remote-video" class="booth-video hidden" autoplay playsinline></video>
-                <div class="video-badge partner-badge-pill">
-                  <span class="badge-dot green"></span> Partner 💕
+                <!-- Dedicated Audio Element for Two-Way Voice Call -->
+                <audio id="remote-audio" autoplay playsinline></audio>
+                <!-- Tap to unmute button if browser autoplay policy blocks sound -->
+                <button id="btn-unmute-call" class="unmute-call-banner hidden">
+                  🔊 Tap to Unmute Partner
+                </button>
+                <div class="video-badge partner-badge-pill" id="partner-user-badge">
+                  <span class="badge-dot green"></span> <span id="partner-speaking-label">Partner 💕</span>
                 </div>
               </div>
             </div>

@@ -225,25 +225,20 @@ class BoothSignaling {
     });
 
     // Handle incoming media call
-    this.peer.on('call', (call) => {
-      console.log('[PeerJS Cloud] Incoming video call from:', call.peer);
+    this.peer.on('call', async (call) => {
+      console.log('[PeerJS Cloud] Incoming video & voice call from:', call.peer);
       this.activeCall = call;
 
+      if (window.boothWebRTC) {
+        await window.boothWebRTC.ensureLocalTracksAdded();
+      }
       const localStream = window.boothWebRTC?.localStream;
       call.answer(localStream);
 
       call.on('stream', (remoteStream) => {
         console.log('[PeerJS Cloud] Remote stream received from partner');
         if (window.boothWebRTC) {
-          window.boothWebRTC.remoteStream = remoteStream;
-          const remoteVideo = document.getElementById('remote-video');
-          if (remoteVideo) {
-            remoteVideo.srcObject = remoteStream;
-            remoteVideo.play().catch(console.warn);
-          }
-          if (window.boothWebRTC.onRemoteTrackReceived) {
-            window.boothWebRTC.onRemoteTrackReceived(remoteStream);
-          }
+          window.boothWebRTC.handleRemoteStream(remoteStream);
         }
       });
     });
@@ -263,34 +258,29 @@ class BoothSignaling {
     const conn = this.peer.connect(targetPeerId, { reliable: true });
     this.setupPeerDataConnection(conn);
 
-    conn.on('open', () => {
+    conn.on('open', async () => {
       console.log('[PeerJS Cloud] Data channel opened with host');
       this.emit('peer_joined', {
         roomId: this.roomId,
         peerId: targetPeerId,
         peerName: 'Partner',
-        shouldInitiateOffer: true
+        shouldInitiateOffer: false
       });
 
       // Start media call
+      if (window.boothWebRTC) {
+        await window.boothWebRTC.ensureLocalTracksAdded();
+      }
       const localStream = window.boothWebRTC?.localStream;
       if (localStream) {
-        console.log('[PeerJS Cloud] Calling host with local video stream...');
+        console.log('[PeerJS Cloud] Calling host with local video & audio stream...');
         const call = this.peer.call(targetPeerId, localStream);
         this.activeCall = call;
 
         call.on('stream', (remoteStream) => {
           console.log('[PeerJS Cloud] Remote stream received from host');
           if (window.boothWebRTC) {
-            window.boothWebRTC.remoteStream = remoteStream;
-            const remoteVideo = document.getElementById('remote-video');
-            if (remoteVideo) {
-              remoteVideo.srcObject = remoteStream;
-              remoteVideo.play().catch(console.warn);
-            }
-            if (window.boothWebRTC.onRemoteTrackReceived) {
-              window.boothWebRTC.onRemoteTrackReceived(remoteStream);
-            }
+            window.boothWebRTC.handleRemoteStream(remoteStream);
           }
         });
       }

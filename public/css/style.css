@@ -522,6 +522,25 @@ body.flashlight-mode .sync-filter-label {
   box-shadow: 0 0 16px rgba(245, 158, 11, 0.6);
 }
 
+.nav-volume-group {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-full);
+  height: 38px;
+  padding: 0 12px;
+}
+
+.volume-icon {
+  font-size: 14px;
+}
+
+.nav-volume-group input[type="range"] {
+  width: 60px;
+}
+
 /* Photobooth Frame & Stage */
 .booth-frame-wrapper {
   flex: 1;
@@ -644,6 +663,38 @@ body.flashlight-mode .sync-filter-label {
 
 .badge-dot.green {
   background: #10B981;
+}
+
+.video-badge.speaking-active {
+  background: rgba(16, 185, 129, 0.85) !important;
+  box-shadow: 0 0 14px rgba(16, 185, 129, 0.8) !important;
+  border: 1px solid #10B981 !important;
+  transform: scale(1.05);
+  transition: all 0.15s ease;
+}
+
+.unmute-call-banner {
+  position: absolute;
+  bottom: 20px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: #10B981;
+  color: #FFFFFF;
+  border: none;
+  font-weight: 700;
+  font-size: 0.85rem;
+  padding: 10px 18px;
+  border-radius: var(--radius-full);
+  box-shadow: 0 4px 16px rgba(16, 185, 129, 0.6);
+  cursor: pointer;
+  z-index: 15;
+  animation: pulseButton 1.5s infinite;
+  white-space: nowrap;
+}
+
+@keyframes pulseButton {
+  0%, 100% { transform: translateX(-50%) scale(1); }
+  50% { transform: translateX(-50%) scale(1.06); }
 }
 
 /* Waiting Partner Box */
